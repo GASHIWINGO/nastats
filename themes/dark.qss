@@ -48,3 +48,23 @@ QTableView::item:selected {
 QTableCornerButton::section {
     background-color: #1c1c1c;
 }
+
+QTabBar::tab {
+    color: white; /* Белый текст */
+    background-color: #2b2b2b;
+    border: 1px solid #444;
+    padding: 6px 10px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background-color: #3c3c3c;
+    border-color: #666;
+    color: white;
+}
+
+QTabBar::tab:!selected:hover {
+    background-color: #444;
+}
