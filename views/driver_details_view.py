@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QGridLayout, QGroupBox,
-    QSizePolicy, QTabWidget
+    QSizePolicy, QTabWidget, QPushButton
 )
 from PySide6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -14,6 +14,7 @@ class DriverDetailsView(QWidget):
         self.driver_id = driver_id
         self.season = season
         self.series = series
+        self.overall_mode = False
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
@@ -24,32 +25,49 @@ class DriverDetailsView(QWidget):
         self.title_label.setStyleSheet("font-size: 22px; font-weight: bold;")
         self.layout.addWidget(self.title_label)
 
-        self.stats_group = QGroupBox("Статистика сезона")
+        self.toggle_button = QPushButton("Статистика за всё время")
+        self.toggle_button.clicked.connect(self._toggle_mode)
+        self.layout.addWidget(self.toggle_button)
+
+        self.stats_group = QGroupBox("Статистика")
         self.stats_layout = QGridLayout(self.stats_group)
         self.layout.addWidget(self.stats_group)
 
-        # --- Вкладки графиков ---
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
 
-        # 1. Финишные позиции
-        self.finish_tab = QWidget()
-        self.finish_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        self._add_chart_tab(self.finish_tab, self.finish_canvas, "Финишные позиции")
+        self._rebuild_tabs()
+        self.load_data()
 
-        # 2. Очки по гонкам
-        self.points_tab = QWidget()
-        self.points_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        self._add_chart_tab(self.points_tab, self.points_canvas, "Очки по гонкам")
+    def _toggle_mode(self):
+        self.overall_mode = not self.overall_mode
+        label = "Статистика сезона" if not self.overall_mode else "Статистика за всё время"
+        self.toggle_button.setText("Статистика сезона" if self.overall_mode else "Статистика за всё время")
+        self.stats_group.setTitle(label)
+        self._rebuild_tabs()
+        self.load_data()
 
-        # 3. Распределение финишей
-        self.pie_tab = QWidget()
-        self.pie_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        self._add_chart_tab(self.pie_tab, self.pie_canvas, "Распределение финишей")
+    def _rebuild_tabs(self):
+        self.tabs.clear()
+
+        if self.overall_mode:
+            self.pie_tab = QWidget()
+            self.pie_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+            self._add_chart_tab(self.pie_tab, self.pie_canvas, "Распределение финишей")
+        else:
+            self.finish_tab = QWidget()
+            self.finish_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+            self._add_chart_tab(self.finish_tab, self.finish_canvas, "Финишные позиции")
+
+            self.points_tab = QWidget()
+            self.points_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+            self._add_chart_tab(self.points_tab, self.points_canvas, "Очки по гонкам")
+
+            self.pie_tab = QWidget()
+            self.pie_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+            self._add_chart_tab(self.pie_tab, self.pie_canvas, "Распределение финишей")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
-
-        self.load_data()
 
     def _add_chart_tab(self, container, canvas, label):
         layout = QVBoxLayout(container)
@@ -58,23 +76,33 @@ class DriverDetailsView(QWidget):
         self.tabs.addTab(container, label)
 
     def load_data(self):
-        self.details = db_sync.get_driver_season_details(
-            driver_id=self.driver_id,
-            season=self.season,
-            series_name=self.series
-        )
+        if self.overall_mode:
+            self.details = db_sync.get_overall_driver_stats(self.driver_id)
+        else:
+            self.details = db_sync.get_driver_season_details(
+                driver_id=self.driver_id,
+                season=self.season,
+                series_name=self.series
+            )
+
         if not self.details:
             self.title_label.setText("Данные не найдены.")
             return
 
-        self.title_label.setText(
-            f"{self.details.get('driver_name')} — {self.series} {self.season}"
-        )
+        if self.overall_mode:
+            self.title_label.setText(f"{self.details.get('driver_name')} — ВСЯ КАРЬЕРА")
+        else:
+            self.title_label.setText(f"{self.details.get('driver_name')} — {self.series} {self.season}")
 
         self._populate_stats(self.details)
-        self._on_tab_changed(0)  # отрисовать первый график
+        self._on_tab_changed(self.tabs.currentIndex())
 
     def _populate_stats(self, d):
+        for i in reversed(range(self.stats_layout.count())):
+            widget = self.stats_layout.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
         labels = [
             ("Гонки", d.get("races")),
             ("Победы", d.get("wins")),
@@ -100,12 +128,15 @@ class DriverDetailsView(QWidget):
             self.stats_layout.addWidget(value_label, i // 3, (i % 3) * 2 + 1)
 
     def _on_tab_changed(self, index):
-        if index == 0:
-            self._draw_finish_positions_chart()
-        elif index == 1:
-            self._draw_points_chart()
-        elif index == 2:
+        if self.overall_mode:
             self._draw_finish_distribution_pie()
+        else:
+            if index == 0:
+                self._draw_finish_positions_chart()
+            elif index == 1:
+                self._draw_points_chart()
+            elif index == 2:
+                self._draw_finish_distribution_pie()
 
     def _draw_finish_positions_chart(self):
         session = db_sync.sync_session_factory()
@@ -115,7 +146,6 @@ class DriverDetailsView(QWidget):
             season=self.season,
             series_id=series_id
         )
-
         session.close()
 
         if not results:
@@ -124,16 +154,14 @@ class DriverDetailsView(QWidget):
         race_nums = [r[0] for r in results]
         finish_positions = [r[2] for r in results]
 
-        ax = self.finish_canvas.figure.subplots()
-        ax.clear()
-
+        self.finish_canvas.figure.clear()
+        ax = self.finish_canvas.figure.add_subplot(111)
         ax.plot(race_nums, finish_positions, marker='o', linestyle='-')
         ax.set_title("Финишные позиции по гонкам")
         ax.set_xlabel("Гонка")
         ax.set_ylabel("Позиция")
         ax.invert_yaxis()
         ax.grid(True)
-
         self.finish_canvas.draw()
 
     def _draw_points_chart(self):
@@ -159,7 +187,6 @@ class DriverDetailsView(QWidget):
                 ).order_by(db_sync.races_table.c.race_num_in_season)
 
                 results = session.execute(stmt).fetchall()
-
         except Exception as e:
             print(f"Ошибка получения очков: {e}")
             results = []
@@ -170,15 +197,13 @@ class DriverDetailsView(QWidget):
         race_nums = [r[0] for r in results]
         points = [r[1] for r in results]
 
-        ax = self.points_canvas.figure.subplots()
-        ax.clear()
-
+        self.points_canvas.figure.clear()
+        ax = self.points_canvas.figure.add_subplot(111)
         ax.plot(race_nums, points, marker='s', linestyle='-', color='green')
         ax.set_title("Очки по гонкам")
         ax.set_xlabel("Гонка")
         ax.set_ylabel("Очки")
         ax.grid(True)
-
         self.points_canvas.draw()
 
     def _draw_finish_distribution_pie(self):
@@ -197,23 +222,18 @@ class DriverDetailsView(QWidget):
             ("Остальные", others)
         ]
 
-        # ❗ Удаляем нулевые значения
         filtered_data = [(label, value) for label, value in raw_data if value > 0]
 
+        self.pie_canvas.figure.clear()
+        ax = self.pie_canvas.figure.add_subplot(111)
+
         if not filtered_data:
-            ax = self.pie_canvas.figure.subplots()
-            ax.clear()
             ax.text(0.5, 0.5, "Нет данных для отображения", ha='center', va='center')
+            ax.set_xticks([])
+            ax.set_yticks([])
+        else:
+            labels, values = zip(*filtered_data)
+            ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=140)
             ax.set_title("Распределение финишных позиций")
-            self.pie_canvas.draw()
-            return
-
-        labels, values = zip(*filtered_data)
-
-        ax = self.pie_canvas.figure.subplots()
-        ax.clear()
-
-        ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=140)
-        ax.set_title("Распределение финишных позиций")
 
         self.pie_canvas.draw()
