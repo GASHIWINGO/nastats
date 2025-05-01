@@ -10,7 +10,8 @@ from views.race_list_view import RaceListView
 from views.driver_list_view import DriverListView
 from views.race_details_view import RaceDetailsView
 from views.driver_details_view import DriverDetailsView
-
+from views.team_list_view import TeamListView
+from views.team_details_view import TeamDetailsView
 
 class MainWindow(QMainWindow):
     def __init__(self, theme_manager):
@@ -44,7 +45,7 @@ class MainWindow(QMainWindow):
         outer_layout.addLayout(self.content_layout)
         self.setCentralWidget(central_widget)
 
-        self.handle_navigation("races")  # Стартовая страница — гонки
+        self.handle_navigation("races")  # Стартовая страница
 
     def handle_navigation(self, page_key: str):
         if self.current_view:
@@ -52,29 +53,34 @@ class MainWindow(QMainWindow):
             self.current_view.deleteLater()
             self.current_view = None
 
+        season = int(self.topbar.season_combo.currentText())
+        series = self.topbar.series_combo.currentText()
+
         if page_key == "races":
-            season = int(self.topbar.season_combo.currentText())
-            series = self.topbar.series_combo.currentText()
             view = RaceListView(season, series)
             view.race_selected.connect(self.show_race_details)
+
         elif page_key == "drivers":
-            season = int(self.topbar.season_combo.currentText())
-            series = self.topbar.series_combo.currentText()
             view = DriverListView(season, series)
             view.driver_selected.connect(self.show_driver_details)
+
+        elif page_key == "teams":
+            view = TeamListView()
+            view.update_context(season, series)
+            view.team_selected.connect(self.show_team_details)
+
         else:
             view = QLabel(f"Страница: {page_key}")
             view.setAlignment(Qt.AlignCenter)
             view.setStyleSheet("font-size: 20px;")
 
         self.current_view = view
-        self.content_layout.addWidget(self.current_view, stretch=1)
+        self.content_layout.addWidget(view, stretch=1)
 
     def show_race_details(self, race_id: int):
         if self.current_view:
             self.content_layout.removeWidget(self.current_view)
             self.current_view.deleteLater()
-            self.current_view = None
 
         view = RaceDetailsView(race_id)
         self.current_view = view
@@ -84,7 +90,6 @@ class MainWindow(QMainWindow):
         if self.current_view:
             self.content_layout.removeWidget(self.current_view)
             self.current_view.deleteLater()
-            self.current_view = None
 
         season = int(self.topbar.season_combo.currentText())
         series = self.topbar.series_combo.currentText()
@@ -92,12 +97,24 @@ class MainWindow(QMainWindow):
         self.current_view = view
         self.content_layout.addWidget(view, stretch=1)
 
+    def show_team_details(self, team_id: int):
+        if self.current_view:
+            self.content_layout.removeWidget(self.current_view)
+            self.current_view.deleteLater()
+
+        season = int(self.topbar.season_combo.currentText())
+        series = self.topbar.series_combo.currentText()
+        view = TeamDetailsView(team_id, season, series)
+        self.current_view = view
+        self.content_layout.addWidget(view, stretch=1)
+
     def _handle_topbar_change(self, *_):
+        season = int(self.topbar.season_combo.currentText())
+        series = self.topbar.series_combo.currentText()
+
         if isinstance(self.current_view, RaceListView):
-            season = int(self.topbar.season_combo.currentText())
-            series = self.topbar.series_combo.currentText()
             self.current_view.update_data(season, series)
         elif isinstance(self.current_view, DriverListView):
-            season = int(self.topbar.season_combo.currentText())
-            series = self.topbar.series_combo.currentText()
             self.current_view.update_data(season, series)
+        elif isinstance(self.current_view, TeamListView):
+            self.current_view.update_context(season, series)
