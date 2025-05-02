@@ -5,7 +5,7 @@ class TeamTableModel(QAbstractTableModel):
     def __init__(self, teams: list, parent=None):
         super().__init__(parent)
         self._teams = teams
-        self._headers = ["Поз.", "Команда", "Очки", "Победы", "Топ-5", "Участий"]
+        self._headers = ["Команда", "Очки", "Победы", "Топ-5", "Участий"]
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._teams)
@@ -21,15 +21,14 @@ class TeamTableModel(QAbstractTableModel):
         col = index.column()
 
         if role == Qt.DisplayRole:
-            if col == 0: return index.row() + 1
-            elif col == 1: return team.team_name
-            elif col == 2: return team.total_points
-            elif col == 3: return team.total_wins
-            elif col == 4: return team.total_top5
-            elif col == 5: return team.total_entries
+            if col == 0: return team.team_name
+            elif col == 1: return team.total_points
+            elif col == 2: return team.total_wins
+            elif col == 3: return team.total_top5
+            elif col == 4: return team.total_entries
 
         elif role == Qt.TextAlignmentRole:
-            return Qt.AlignCenter if col != 1 else Qt.AlignLeft | Qt.AlignVCenter
+            return Qt.AlignCenter
 
         return None
 
@@ -43,11 +42,11 @@ class TeamTableModel(QAbstractTableModel):
             return
 
         key_funcs = {
-            1: lambda t: t.team_name.lower(),
-            2: lambda t: t.total_points or 0,
-            3: lambda t: t.total_wins or 0,
-            4: lambda t: t.total_top5 or 0,
-            5: lambda t: t.total_entries or 0
+            0: lambda t: t.team_name.lower(),
+            1: lambda t: t.total_points or 0,
+            2: lambda t: t.total_wins or 0,
+            3: lambda t: t.total_top5 or 0,
+            4: lambda t: t.total_entries or 0
         }
 
         key_func = key_funcs.get(column, lambda t: 0)
