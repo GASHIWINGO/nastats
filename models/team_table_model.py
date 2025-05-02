@@ -38,5 +38,24 @@ class TeamTableModel(QAbstractTableModel):
             return self._headers[section]
         return super().headerData(section, orientation, role)
 
+    def sort(self, column: int, order: Qt.SortOrder):
+        if not self._teams:
+            return
+
+        key_funcs = {
+            1: lambda t: t.team_name.lower(),
+            2: lambda t: t.total_points or 0,
+            3: lambda t: t.total_wins or 0,
+            4: lambda t: t.total_top5 or 0,
+            5: lambda t: t.total_entries or 0
+        }
+
+        key_func = key_funcs.get(column, lambda t: 0)
+        reverse = order == Qt.DescendingOrder
+
+        self.layoutAboutToBeChanged.emit()
+        self._teams.sort(key=key_func, reverse=reverse)
+        self.layoutChanged.emit()
+
     def team_id(self, row: int) -> int:
         return self._teams[row].team_id

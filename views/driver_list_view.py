@@ -1,10 +1,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTableView, QSizePolicy, QHeaderView
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from models.driver_table_model import DriverTableModel
 import db_sync
-from PySide6.QtCore import Qt, Signal
 
 
 class DriverListView(QWidget):
@@ -36,24 +35,20 @@ class DriverListView(QWidget):
             season=self.season,
             series_name=self.series,
             page=1,
-            page_size=5000  # ⚠️ большое значение для загрузки всех
+            page_size=5000  # ✅ Все гонщики
         )
         model = DriverTableModel(drivers)
         self.table.setModel(model)
 
         header = self.table.horizontalHeader()
-        self.table.setColumnWidth(0, 70)   # Позиция
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Гонщик
         self.table.setColumnWidth(2, 80)   # Очки
         self.table.setColumnWidth(3, 80)   # Победы
         self.table.setColumnWidth(4, 70)   # Гонок
         header.setStretchLastSection(False)
 
-        
-
         self.table.setSortingEnabled(True)
         self.table.sortByColumn(2, Qt.DescendingOrder)
-
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
 
@@ -69,4 +64,3 @@ class DriverListView(QWidget):
         model = self.table.model()
         driver_id = model.driver_id(index.row())
         self.driver_selected.emit(driver_id)
-

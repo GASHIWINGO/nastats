@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView, QHeaderView
 from PySide6.QtCore import Qt, Signal
 import db_sync
 from models.team_table_model import TeamTableModel
@@ -22,6 +22,15 @@ class TeamListView(QWidget):
         layout.addWidget(self.label)
 
         self.table = QTableView()
+        self.table.setSortingEnabled(True)
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.Fixed)
+
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Команда
+        for i in [0, 2, 3, 4, 5]:  # Поз, Очки, Победы, Топ-5, Участий
+            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+
         self.table.doubleClicked.connect(self._on_row_double_clicked)
         layout.addWidget(self.table)
 
