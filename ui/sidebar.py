@@ -20,8 +20,8 @@ class Sidebar(QWidget):
             "races": "🏁 Гонки",
             "drivers": "👨‍✈️ Гонщики",
             "teams": "🚗 Команды",
-            "compare": "⚔️ Сравнение",
-            "manufacturers": "🏭 Производители"
+            "manufacturers": "🏭 Производители",
+            "compare": "⚔️ Сравнение"
         }
 
         for page_key, label in pages.items():

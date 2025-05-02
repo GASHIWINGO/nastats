@@ -568,37 +568,42 @@ def get_manufacturer_season_stats(season: int, series_name: str = 'Cup'):
     with get_db_session() as session:
         try:
             series_id = get_series_id_by_name(session, series_name)
-            if not series_id: return []
+            if not series_id:
+                return []
 
             # Запрос агрегированной статистики
             stats_stmt = select(
+                manufacturers_table.c.manufacturer_id,  # ✅ Добавлено
                 manufacturers_table.c.manufacturer_name,
                 func.sum(race_entries_table.c.won_race).label('wins'),
                 func.sum(case((race_entries_table.c.finish_position <= 5, 1), else_=0)).label('top5'),
                 func.sum(case((race_entries_table.c.finish_position <= 10, 1), else_=0)).label('top10'),
                 func.sum(func.coalesce(race_entries_table.c.laps_led, 0)).label('laps_led'),
-                func.count(race_entries_table.c.driver_id).label('entries') # Считаем кол-во участий машин
-            ).select_from(race_entries_table
-            ).join(races_table, race_entries_table.c.race_id == races_table.c.race_id
-            ).join(manufacturers_table, race_entries_table.c.manufacturer_id == manufacturers_table.c.manufacturer_id
+                func.count(race_entries_table.c.driver_id).label('entries')
+            ).select_from(
+                race_entries_table
+            ).join(
+                races_table, race_entries_table.c.race_id == races_table.c.race_id
+            ).join(
+                manufacturers_table, race_entries_table.c.manufacturer_id == manufacturers_table.c.manufacturer_id
             ).where(
                 (races_table.c.season == season) &
                 (races_table.c.series_id == series_id) &
                 (race_entries_table.c.manufacturer_id != None) &
-                (race_entries_table.c.driver_id != None) # Для корректного подсчета entries
+                (race_entries_table.c.driver_id != None)
             ).group_by(
-                manufacturers_table.c.manufacturer_id, # Группируем по ID
-                manufacturers_table.c.manufacturer_name # И по имени
+                manufacturers_table.c.manufacturer_id,
+                manufacturers_table.c.manufacturer_name
             ).order_by(
-                desc('wins'), # Сортируем по убыванию побед
-                desc('top5'),  # Затем по топ-5
-                asc(manufacturers_table.c.manufacturer_name) # По имени для стабильности
+                desc('wins'),
+                desc('top5'),
+                asc(manufacturers_table.c.manufacturer_name)
             )
 
-            # Используем .mappings().all() для получения списка словарей
             results = session.execute(stats_stmt).mappings().all()
             logger.info(f"Найдена статистика для {len(results)} производителей.")
-            return results # Возвращаем список словарей
+            return results
+
         except Exception as e:
             logger.error(f"Ошибка при получении статистики производителей (season={season}): {e}", exc_info=True)
             return []

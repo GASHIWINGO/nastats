@@ -12,6 +12,9 @@ from views.race_details_view import RaceDetailsView
 from views.driver_details_view import DriverDetailsView
 from views.team_list_view import TeamListView
 from views.team_details_view import TeamDetailsView
+from views.manufacturer_list_view import ManufacturerListView
+from views.manufacturer_details_view import ManufacturerDetailsView
+
 
 class MainWindow(QMainWindow):
     def __init__(self, theme_manager):
@@ -45,7 +48,7 @@ class MainWindow(QMainWindow):
         outer_layout.addLayout(self.content_layout)
         self.setCentralWidget(central_widget)
 
-        self.handle_navigation("races")  # Стартовая страница
+        self.handle_navigation("races")  # Стартовая вкладка
 
     def handle_navigation(self, page_key: str):
         if self.current_view:
@@ -68,6 +71,10 @@ class MainWindow(QMainWindow):
             view = TeamListView()
             view.update_context(season, series)
             view.team_selected.connect(self.show_team_details)
+
+        elif page_key == "manufacturers":
+            view = ManufacturerListView(season, series)
+            view.manufacturer_selected.connect(self.show_manufacturer_details)
 
         else:
             view = QLabel(f"Страница: {page_key}")
@@ -108,6 +115,17 @@ class MainWindow(QMainWindow):
         self.current_view = view
         self.content_layout.addWidget(view, stretch=1)
 
+    def show_manufacturer_details(self, manufacturer_id: int):
+        if self.current_view:
+            self.content_layout.removeWidget(self.current_view)
+            self.current_view.deleteLater()
+
+        season = int(self.topbar.season_combo.currentText())
+        series = self.topbar.series_combo.currentText()
+        view = ManufacturerDetailsView(manufacturer_id, season, series)
+        self.current_view = view
+        self.content_layout.addWidget(view, stretch=1)
+
     def _handle_topbar_change(self, *_):
         season = int(self.topbar.season_combo.currentText())
         series = self.topbar.series_combo.currentText()
@@ -117,4 +135,6 @@ class MainWindow(QMainWindow):
         elif isinstance(self.current_view, DriverListView):
             self.current_view.update_data(season, series)
         elif isinstance(self.current_view, TeamListView):
+            self.current_view.update_context(season, series)
+        elif isinstance(self.current_view, ManufacturerListView):
             self.current_view.update_context(season, series)
