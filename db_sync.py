@@ -841,6 +841,37 @@ def get_team_race_results_for_season(team_id: int, season: int, series_id: int):
         except Exception as e:
             logger.error(f"Ошибка получения средних результатов гонок команды для графика: {e}", exc_info=True)
             return []
+        
+def get_manufacturer_wins_by_season(manufacturer_id: int):
+    """Возвращает количество побед производителя по каждому сезону."""
+    if race_entries_table is None or races_table is None:
+        logger.error("Таблицы race_entries или races не отражены.")
+        return []
+
+    with get_db_session() as session:
+        try:
+            stmt = select(
+                races_table.c.season,
+                func.count().label("wins")
+            ).join_from(
+                race_entries_table, races_table,
+                race_entries_table.c.race_id == races_table.c.race_id
+            ).where(
+                (race_entries_table.c.manufacturer_id == manufacturer_id) &
+                (race_entries_table.c.won_race == 1)
+            ).group_by(
+                races_table.c.season
+            ).order_by(
+                races_table.c.season
+            )
+
+            results = session.execute(stmt).all()
+            return results
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении побед производителя по сезонам: {e}", exc_info=True)
+            return []
+
 
 # --- Конец адаптации функций ---
 

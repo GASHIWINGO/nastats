@@ -1,4 +1,7 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QGroupBox, QPushButton, QTabWidget
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QGridLayout, QGroupBox,
+    QPushButton, QTabWidget
+)
 from PySide6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -32,23 +35,32 @@ class ManufacturerDetailsView(QWidget):
         self.tabs = QTabWidget()
         self.layout.addWidget(self.tabs)
 
-        self._rebuild_tabs()
+        self._setup_tabs()
         self.load_data()
 
     def _toggle_mode(self):
         self.overall_mode = not self.overall_mode
         self.toggle_button.setText("Статистика сезона" if self.overall_mode else "Статистика за всё время")
         self.stats_group.setTitle("Статистика за всё время" if self.overall_mode else "Статистика")
-        self._rebuild_tabs()
+        self._setup_tabs()
         self.load_data()
 
-    def _rebuild_tabs(self):
+    def _setup_tabs(self):
         self.tabs.clear()
+
+        if self.overall_mode:
+            self.wins_tab = QWidget()
+            self.wins_canvas = FigureCanvas(Figure(figsize=(5, 3)))
+            layout1 = QVBoxLayout(self.wins_tab)
+            layout1.addWidget(self.wins_canvas)
+            self.tabs.addTab(self.wins_tab, "Победы по сезонам")
+
         self.pie_tab = QWidget()
         self.pie_canvas = FigureCanvas(Figure(figsize=(5, 3)))
-        layout = QVBoxLayout(self.pie_tab)
-        layout.addWidget(self.pie_canvas)
+        layout2 = QVBoxLayout(self.pie_tab)
+        layout2.addWidget(self.pie_canvas)
         self.tabs.addTab(self.pie_tab, "Распределение финишей")
+
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def load_data(self):
@@ -65,7 +77,11 @@ class ManufacturerDetailsView(QWidget):
         name = self.details.get("manufacturer_name", f"ID {self.manufacturer_id}")
         self.title.setText(f"{name} — {'ВСЯ КАРЬЕРА' if self.overall_mode else f'{self.series} {self.season}'}")
         self._populate_stats(self.details)
-        self._draw_pie_chart()
+
+        if self.overall_mode and self.tabs.currentIndex() == 0:
+            self._draw_wins_by_season()
+        else:
+            self._draw_pie_chart()
 
     def _populate_stats(self, d):
         for i in reversed(range(self.stats_layout.count())):
@@ -94,7 +110,10 @@ class ManufacturerDetailsView(QWidget):
             self.stats_layout.addWidget(val, i // 2, (i % 2) * 2 + 1)
 
     def _on_tab_changed(self, index):
-        self._draw_pie_chart()
+        if self.overall_mode and index == 0:
+            self._draw_wins_by_season()
+        else:
+            self._draw_pie_chart()
 
     def _draw_pie_chart(self):
         if not self.details or self.details.get('entries', 0) == 0:
@@ -119,3 +138,20 @@ class ManufacturerDetailsView(QWidget):
             ax.text(0.5, 0.5, "Нет данных для отображения", ha='center', va='center')
 
         self.pie_canvas.draw()
+
+    def _draw_wins_by_season(self):
+        data = db_sync.get_manufacturer_wins_by_season(self.manufacturer_id)
+        if not data:
+            return
+
+        seasons = [r[0] for r in data]
+        wins = [r[1] for r in data]
+
+        self.wins_canvas.figure.clear()
+        ax = self.wins_canvas.figure.add_subplot(111)
+        ax.plot(seasons, wins, marker="o", linestyle="-")
+        ax.set_title("Победы по сезонам")
+        ax.set_xlabel("Сезон")
+        ax.set_ylabel("Победы")
+        ax.grid(True)
+        self.wins_canvas.draw()
