@@ -915,7 +915,25 @@ def get_all_teams_list():
             logger.error(f"Ошибка получения списка всех команд: {e}", exc_info=True)
             return []
 
-# --- Конец адаптации функций ---
+def get_all_manufacturers_list():
+    """Получает список всех производителей (ID, Имя) для использования в UI."""
+    logger.info("Запрос списка всех производителей...")
+    if manufacturers_table is None:
+        logger.error("Таблица Manufacturers не отражена.")
+        return []
+    with get_db_session() as session:
+        try:
+            stmt = select(
+                manufacturers_table.c.manufacturer_id,
+                manufacturers_table.c.manufacturer_name
+            ).order_by(asc(manufacturers_table.c.manufacturer_name))
+            results = session.execute(stmt).fetchall()
+            logger.info(f"Найдено {len(results)} производителей.")
+            # Возвращаем список кортежей (id, name)
+            return results
+        except Exception as e:
+            logger.error(f"Ошибка получения списка всех производителей: {e}", exc_info=True)
+            return []
 
 if __name__ == '__main__':
     # Пример использования и проверки
@@ -1079,3 +1097,11 @@ if __name__ == '__main__':
         print("Первые 5 команд:")
         for team_id, team_name in all_teams[:5]:
             print(f"  ID: {team_id}, Имя: {team_name}")
+
+    print("\n--- Тест получения списка производителей ---")
+    all_manufacturers = get_all_manufacturers_list()
+    print(f"Получено производителей: {len(all_manufacturers)}")
+    if all_manufacturers:
+        print("Производители:")
+        for manu_id, manu_name in all_manufacturers:
+            print(f"  ID: {manu_id}, Имя: {manu_name}")

@@ -34,13 +34,13 @@ class CompareView(QWidget):
         # Кэши данных
         self._drivers_data = []
         self._teams_data = []
-        # TODO: Добавить кэш для производителей
+        self._manufacturers_data = []
         self.stats1_cache = None
         self.stats2_cache = None
         self.season_results1_cache = None
         self.season_results2_cache = None
         # Кэши выбранного типа/режима
-        self.current_entity_type = "driver" # "driver", "team", "manufacturer"
+        self.current_entity_type = "driver"
         self.is_season_mode_cache = False
 
         self.layout = QVBoxLayout()
@@ -51,13 +51,13 @@ class CompareView(QWidget):
         self.load_initial_data()
         self.setup_selection_ui()
         self.setup_results_ui()
-        self._update_combos_for_entity_type() # Первичная настройка комбобоксов
+        self._update_combos_for_entity_type()
 
     def load_initial_data(self):
         """Загружает данные, необходимые для инициализации UI."""
         self._drivers_data = db_sync.get_all_drivers_list()
         self._teams_data = db_sync.get_all_teams_list()
-        # TODO: Загрузить список производителей
+        self._manufacturers_data = db_sync.get_all_manufacturers_list()
 
     def setup_selection_ui(self):
         # --- Группа выбора типа сущности ---
@@ -65,25 +65,25 @@ class CompareView(QWidget):
         self.entity_type_label = QLabel("Тип:")
         self.driver_radio = QRadioButton("Гонщики")
         self.team_radio = QRadioButton("Команды")
-        # self.manu_radio = QRadioButton("Производители") # TODO: Добавить
+        self.manu_radio = QRadioButton("Производители")
         self.driver_radio.setChecked(True)
 
-        self.entity_type_group = QButtonGroup(self) # Группа для эксклюзивности
+        self.entity_type_group = QButtonGroup(self)
         self.entity_type_group.addButton(self.driver_radio)
         self.entity_type_group.addButton(self.team_radio)
-        # self.entity_type_group.addButton(self.manu_radio)
+        self.entity_type_group.addButton(self.manu_radio)
 
         entity_type_layout.addWidget(self.entity_type_label)
         entity_type_layout.addWidget(self.driver_radio)
         entity_type_layout.addWidget(self.team_radio)
-        # entity_type_layout.addWidget(self.manu_radio)
+        entity_type_layout.addWidget(self.manu_radio)
         entity_type_layout.addStretch()
         self.layout.addLayout(entity_type_layout)
 
         # Подключаем сигнал смены типа сущности
         self.driver_radio.toggled.connect(lambda checked: self._on_entity_type_changed("driver", checked))
         self.team_radio.toggled.connect(lambda checked: self._on_entity_type_changed("team", checked))
-        # self.manu_radio.toggled.connect(lambda checked: self._on_entity_type_changed("manufacturer", checked))
+        self.manu_radio.toggled.connect(lambda checked: self._on_entity_type_changed("manufacturer", checked))
 
         # --- Верхняя часть: Выбор режима и контекста (как и раньше) ---
         context_layout = QHBoxLayout()
@@ -162,18 +162,18 @@ class CompareView(QWidget):
 
     def _update_combos_for_entity_type(self):
         """Обновляет модели и метки комбобоксов в соответствии с выбранным типом сущности."""
+        label_text = "Сущность" # Значение по умолчанию
         if self.current_entity_type == "driver":
             data = self._drivers_data
             label_text = "Гонщик"
         elif self.current_entity_type == "team":
             data = self._teams_data
             label_text = "Команда"
-        # elif self.current_entity_type == "manufacturer":
-        #     data = self._manufacturers_data # TODO
-        #     label_text = "Произв."
+        elif self.current_entity_type == "manufacturer": # <-- Обработка нового типа
+            data = self._manufacturers_data
+            label_text = "Произв-ль" # Сокращенно для метки
         else:
             data = []
-            label_text = "Сущность"
 
         self.entity1_label.setText(f"{label_text} 1:")
         self.entity2_label.setText(f"{label_text} 2:")
@@ -182,8 +182,9 @@ class CompareView(QWidget):
         for combo in [self.entity1_combo, self.entity2_combo]:
             model = IdNameItemModel(data, self)
             combo.setModel(model)
-            combo.completer().setModel(model) # Обновляем модель и для completer
-            combo.setCurrentIndex(-1) # Сбрасываем выбор
+            combo.completer().setModel(model)
+            combo.setCurrentIndex(-1)
+            # Плейсхолдер тоже меняется
             combo.lineEdit().setPlaceholderText(f"Начните вводить {label_text.lower()}...")
 
     def _create_dynamic_combo(self) -> QComboBox:
@@ -287,6 +288,11 @@ class CompareView(QWidget):
         self.is_season_mode_cache = is_season_mode
         series_id = None
         context_str = ""
+        # Сбрасываем кэши перед загрузкой
+        self.stats1_cache = None
+        self.stats2_cache = None
+        self.season_results1_cache = None
+        self.season_results2_cache = None
 
         # --- Выбираем функции загрузки данных в зависимости от типа сущности ---
         if self.current_entity_type == "driver":
@@ -316,9 +322,21 @@ class CompareView(QWidget):
                 self.stats1_cache = db_sync.get_overall_team_stats(id1)
                 self.stats2_cache = db_sync.get_overall_team_stats(id2)
                 context_str = "Карьера"
-        # elif self.current_entity_type == "manufacturer":
-            # TODO: Загрузка данных для производителей
-            # pass
+        elif self.current_entity_type == "manufacturer":
+            if is_season_mode:
+                # Получаем статистику ВСЕХ производителей за сезон
+                all_manu_stats = db_sync.get_manufacturer_season_stats(season, series)
+                # Находим нужных нам по ID
+                self.stats1_cache = next((m for m in all_manu_stats if m.get('manufacturer_id') == id1), None)
+                self.stats2_cache = next((m for m in all_manu_stats if m.get('manufacturer_id') == id2), None)
+                # Сезонных графиков для производителей пока нет
+                self.season_results1_cache = None
+                self.season_results2_cache = None
+                context_str = f"{series} {season}"
+            else:
+                self.stats1_cache = db_sync.get_overall_manufacturer_stats(id1)
+                self.stats2_cache = db_sync.get_overall_manufacturer_stats(id2)
+                context_str = "Карьера"
 
         self.display_comparison(self.stats1_cache, self.stats2_cache, context_str)
         self.draw_comparison_chart()
@@ -387,9 +405,14 @@ class CompareView(QWidget):
                 "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт (команды)", False),
                 "avg_finish": ("Средний финиш (команды)", False), "points": ("Очки (команды)", True)
             }
-        # elif self.current_entity_type == "manufacturer":
-        #     # TODO: Добавить карту для производителей
-        #     stat_map = {"entries": ("Участий", True), "wins": ("Победы", True), ...}
+        elif self.current_entity_type == "manufacturer":
+            stat_map = {
+                "entries": ("Участий", True),
+                "wins": ("Победы", True),
+                "top5": ("Топ-5", True),
+                "top10": ("Топ-10", True),
+                "laps_led": ("Круги\nлидерства", True)
+            }
 
         default_palette = self.palette()
         highlight_color = QColor(Qt.darkGreen).lighter(150)
@@ -497,18 +520,15 @@ class CompareView(QWidget):
                 self._draw_season_points_chart(self.stats1_cache, self.stats2_cache, self.season_results1_cache, self.season_results2_cache)
             elif self.current_entity_type == "team":
                  self._draw_season_team_avg_finish_chart(self.stats1_cache, self.stats2_cache, self.season_results1_cache, self.season_results2_cache)
-                 # Можно добавить еще график, например, суммарных очков команды по гонкам
-            # elif self.current_entity_type == "manufacturer":
-                 # TODO: Графики для производителей (сезон)
-                 pass
+            elif self.current_entity_type == "manufacturer":
+                self._draw_overall_manufacturer_bar_chart(self.stats1_cache, self.stats2_cache)
         else: # Режим карьеры
             if self.current_entity_type == "driver":
                 self._draw_overall_bar_chart(self.stats1_cache, self.stats2_cache)
             elif self.current_entity_type == "team":
                  self._draw_overall_team_bar_chart(self.stats1_cache, self.stats2_cache)
-            # elif self.current_entity_type == "manufacturer":
-                 # TODO: График для производителей (карьера)
-                 pass
+            elif self.current_entity_type == "manufacturer":
+                self._draw_overall_manufacturer_bar_chart(self.stats1_cache, self.stats2_cache)
 
         # Перерисовываем все canvas
         self.career_chart_canvas.draw()
@@ -775,6 +795,48 @@ class CompareView(QWidget):
         ax.bar_label(rects1, padding=3, fmt='%g')
         ax.bar_label(rects2, padding=3, fmt='%g')
         fig.tight_layout()
+        self.career_chart_canvas.setVisible(True) # Показываем график
+
+    def _draw_overall_manufacturer_bar_chart(self, stats1, stats2):
+        """Рисует столбчатую диаграмму сравнения карьеры ПРОИЗВОДИТЕЛЕЙ."""
+        if not stats1 or not stats2:
+            return # График career_chart_canvas останется скрытым
+
+        # Ключи для статистики производителей
+        labels_map = {
+            'wins': 'Победы', 'top5': 'Топ-5', 'top10': 'Топ-10',
+            'laps_led': 'Круги\nлидерства', 'entries': 'Участий'
+        }
+        # Убедимся, что порядок ключей соответствует карте
+        stat_keys = ['entries', 'wins', 'top5', 'top10', 'laps_led']
+        labels = [labels_map[k] for k in stat_keys]
+
+        values1 = [stats1.get(key, 0) for key in stat_keys]
+        values2 = [stats2.get(key, 0) for key in stat_keys]
+
+        name1 = stats1.get('manufacturer_name', 'Произв. 1') # Используем manufacturer_name
+        name2 = stats2.get('manufacturer_name', 'Произв. 2')
+
+        x = np.arange(len(labels))
+        width = 0.35
+
+        fig = self.career_chart_canvas.figure # Используем тот же canvas
+        fig.clear()
+        ax = fig.add_subplot(111)
+
+        rects1 = ax.bar(x - width/2, values1, width, label=name1)
+        rects2 = ax.bar(x + width/2, values2, width, label=name2)
+
+        ax.set_ylabel('Значение')
+        ax.set_title('Сравнение статистики производителей за карьеру') # Меняем заголовок
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+        ax.legend()
+        ax.bar_label(rects1, padding=3, fmt='%g')
+        ax.bar_label(rects2, padding=3, fmt='%g')
+        fig.tight_layout() # Вызываем перед subplots_adjust
+        fig.subplots_adjust(bottom=0.15) # Даем место подписям (можно меньше, чем для сезонных)
+        self.career_chart_canvas.draw() # Перерисовываем
         self.career_chart_canvas.setVisible(True) # Показываем график
 
     # Метод для обновления данных, если контекст изменится (пока не используется)
