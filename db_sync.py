@@ -387,10 +387,11 @@ def get_driver_season_details(driver_id: int, season: int, series_name: str = 'C
 
 def get_driver_race_results_for_season(driver_id: int, season: int, series_id: int):
     """
-    Получает результаты (номер гонки, финиш) для гонщика за сезон/серию.
-    Возвращает список кортежей (race_num_in_season, finish_position) или пустой список.
+    Получает результаты (номер гонки, старт, финиш, ОЧКИ) для гонщика за сезон/серию.
+    Возвращает список кортежей (race_num_in_season, start_position, finish_position, points)
+    или пустой список.
     """
-    logger.info(f"Запрос результатов гонок для driver_id={driver_id}, season={season}, series_id={series_id}")
+    logger.info(f"Запрос результатов гонок (с очками) для driver_id={driver_id}, season={season}, series_id={series_id}")
     required_tables = [race_entries_table, races_table]
     if any(table is None for table in required_tables):
         missing = [name for name, table in zip(['RaceEntries', 'Races'], required_tables) if table is None]
@@ -402,21 +403,23 @@ def get_driver_race_results_for_season(driver_id: int, season: int, series_id: i
             stmt = select(
                 races_table.c.race_num_in_season,
                 race_entries_table.c.start_position,
-                race_entries_table.c.finish_position
+                race_entries_table.c.finish_position,
+                race_entries_table.c.points # <--- Добавляем столбец очков
             ).select_from(race_entries_table
             ).join(races_table, race_entries_table.c.race_id == races_table.c.race_id
             ).where(
                 (race_entries_table.c.driver_id == driver_id) &
                 (races_table.c.season == season) &
-                (races_table.c.series_id == series_id) &
-                (race_entries_table.c.finish_position != None) # Учитываем только финишировавших
+                (races_table.c.series_id == series_id)
+                # Убираем фильтр по finish_position != None, т.к. очки могут быть и за DNF
             ).order_by(asc(races_table.c.race_num_in_season)) # Сортируем по номеру гонки
 
             results = session.execute(stmt).fetchall()
-            logger.info(f"Найдено {len(results)} результатов гонок для графика.")
+            logger.info(f"Найдено {len(results)} результатов гонок (с очками) для графика.")
+            # Кортеж теперь содержит 4 элемента
             return results
         except Exception as e:
-            logger.error(f"Ошибка получения результатов гонок для графика: {e}", exc_info=True)
+            logger.error(f"Ошибка получения результатов гонок (с очками) для графика: {e}", exc_info=True)
             return []
 
 def get_team_standings(season: int, series_name: str = 'Cup', page: int = 1, page_size: int = 10):

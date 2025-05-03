@@ -34,6 +34,8 @@ class CompareView(QWidget):
         self._drivers_data = []
         self.stats1_cache = None
         self.stats2_cache = None
+        self.season_results1_cache = None
+        self.season_results2_cache = None
         self.is_season_mode_cache = False
 
         # --- Изменение здесь ---
@@ -159,23 +161,16 @@ class CompareView(QWidget):
         self.series_combo.setVisible(is_season_mode)
 
     def setup_results_ui(self):
-        # Используем QScrollArea на случай большого количества статистики
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QFrame.NoFrame) # Убираем рамку у ScrollArea
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
 
-        self.results_container = QWidget() # Контейнер для размещения внутри ScrollArea
-        self.results_layout = QHBoxLayout(self.results_container) # Горизонтальный layout для двух колонок
-        self.results_layout.setSpacing(20)
-
-        # Используем QVBoxLayout, чтобы разместить статистику и графики друг под другом
+        self.results_container = QWidget()
         self.results_main_layout = QVBoxLayout(self.results_container)
         self.results_main_layout.setSpacing(20)
 
-        # Горизонтальный layout для колонок статистики
+        # --- Статистика (как и раньше) ---
         self.stats_layout = QHBoxLayout()
-        self.stats_layout.setSpacing(20)
-
         self.driver1_stats_group = QGroupBox("Гонщик 1")
         self.driver1_grid = QGridLayout(self.driver1_stats_group)
         self.driver1_stats_group.setMinimumWidth(350)
@@ -191,30 +186,36 @@ class CompareView(QWidget):
         # Добавляем layout статистики в основной вертикальный layout
         self.results_main_layout.addLayout(self.stats_layout)
 
-        # --- Добавляем виджет для графика ---
-        # Пока один график для сравнения основных показателей
-        self.chart_canvas = FigureCanvas(Figure(figsize=(8, 4))) # Размер можно настроить
-        self.chart_canvas.setVisible(False) # Скрываем по умолчанию
-        # Уменьшаем минимальную высоту, чтобы он не растягивал окно слишком сильно
-        self.chart_canvas.setMinimumHeight(200)
-        self.results_main_layout.addWidget(self.chart_canvas)
+        # --- Графики ---
+        # Убираем аргумент parent
+        self.career_chart_canvas = FigureCanvas(Figure(figsize=(8, 4))) # <-- Убран parent
+        self.career_chart_canvas.setVisible(False)
+        self.career_chart_canvas.setMinimumHeight(250)
+        self.results_main_layout.addWidget(self.career_chart_canvas)
+
+        # Убираем аргумент parent
+        self.season_finish_canvas = FigureCanvas(Figure(figsize=(8, 4))) # <-- Убран parent
+        self.season_finish_canvas.setVisible(False)
+        self.season_finish_canvas.setMinimumHeight(250)
+        self.results_main_layout.addWidget(self.season_finish_canvas)
+
+        # Убираем аргумент parent
+        self.season_points_canvas = FigureCanvas(Figure(figsize=(8, 4))) # <-- Убран parent
+        self.season_points_canvas.setVisible(False)
+        self.season_points_canvas.setMinimumHeight(250)
+        self.results_main_layout.addWidget(self.season_points_canvas)
 
         self.scroll_area.setWidget(self.results_container)
         self.layout.addWidget(self.scroll_area, stretch=1)
 
     def load_comparison_data(self):
-        # --- Перемещаем очистку сюда ---
-        self.clear_results() # Очищаем старые результаты ПЕРЕД загрузкой новых
-
+        self.clear_results()
         # Получаем ID из комбобоксов
         idx1 = self.driver1_combo.currentIndex()
         idx2 = self.driver2_combo.currentIndex()
 
-        # print(f"DEBUG: Индексы комбобоксов: idx1={idx1}, idx2={idx2}") # Можно убрать
-
         if idx1 < 0 or idx2 < 0:
             print("Ошибка: Выберите обоих гонщиков.")
-            # self.clear_results() # Уже вызвали выше
             return
 
         model1: IdNameItemModel = self.driver1_combo.model()
@@ -222,42 +223,45 @@ class CompareView(QWidget):
         driver1_id = model1.getId(idx1)
         driver2_id = model2.getId(idx2)
 
-        # print(f"DEBUG: Полученные ID: driver1_id={driver1_id}, driver2_id={driver2_id}") # Можно убрать
-
-        if not driver1_id or not driver2_id:
-             print("Ошибка: Не удалось получить ID гонщиков.")
-             # self.clear_results() # Уже вызвали выше
+        if not driver1_id or not driver2_id or driver1_id == driver2_id:
+             print("Ошибка: Выберите двух разных гонщиков.")
              return
-
-        if driver1_id == driver2_id:
-            print("Ошибка: Выберите двух разных гонщиков.")
-            # self.clear_results() # Уже вызвали выше
-            return
 
         is_season_mode = self.season_radio.isChecked()
         season = int(self.season_combo.currentText()) if is_season_mode else None
         series = self.series_combo.currentText() if is_season_mode else None
-        # print(f"DEBUG: Режим: {'Сезон' if is_season_mode else 'Карьера'}, Сезон: {season}, Серия: {series}") # Можно убрать
+        self.is_season_mode_cache = is_season_mode
 
-        # print("DEBUG: Загрузка данных из db_sync...") # Можно убрать
+        context_str = ""
+        series_id = None # Нужен для запроса сезонных результатов
+
         if is_season_mode:
+            with db_sync.get_db_session() as session: # Получаем ID серии
+                series_id = db_sync.get_series_id_by_name(session, series)
+
+            if not series_id:
+                print(f"Ошибка: Серия '{series}' не найдена в БД.")
+                return # Не можем продолжить без ID серии
+
             self.stats1_cache = db_sync.get_driver_season_details(driver1_id, season, series)
             self.stats2_cache = db_sync.get_driver_season_details(driver2_id, season, series)
+            # --- Загружаем данные для сезонных графиков ---
+            self.season_results1_cache = db_sync.get_driver_race_results_for_season(driver1_id, season, series_id)
+            self.season_results2_cache = db_sync.get_driver_race_results_for_season(driver2_id, season, series_id)
             context_str = f"{series} {season}"
         else:
             self.stats1_cache = db_sync.get_overall_driver_stats(driver1_id)
             self.stats2_cache = db_sync.get_overall_driver_stats(driver2_id)
+            # Сбрасываем кэш сезонных результатов
+            self.season_results1_cache = None
+            self.season_results2_cache = None
             context_str = "Карьера"
-        # print(f"DEBUG: Данные загружены. Stats1: {bool(self.stats1_cache)}, Stats2: {bool(self.stats2_cache)}") # Можно убрать
-        self.is_season_mode_cache = is_season_mode
 
-        # Отображаем статистику и графики
-        # Теперь display_comparison не будет сбрасывать кэш перед draw_comparison_chart
         self.display_comparison(self.stats1_cache, self.stats2_cache, context_str)
         self.draw_comparison_chart()
 
     def display_comparison(self, stats1, stats2, context_str: str):
-        # self.clear_results() # <--- Убираем вызов отсюда
+        # Очистка перенесена в load_comparison_data
 
         # Устанавливаем заголовки
         title1 = self._get_title(stats1, "Гонщик 1", context_str)
@@ -268,6 +272,29 @@ class CompareView(QWidget):
         # Заполняем сетки статистики
         self._populate_comparison_grids(stats1, stats2)
 
+        # --- Явно делаем группы статистики видимыми ---
+        # Проверяем, есть ли хоть какие-то данные для отображения
+        if stats1 or stats2:
+             print("DEBUG [display_comparison] Setting stats groups visible")
+             self.driver1_stats_group.setVisible(True)
+             self.driver2_stats_group.setVisible(True)
+        else:
+             # Если данных вообще нет, можно скрыть группы (хотя populate_grids добавляет "нет данных")
+             self.driver1_stats_group.setVisible(False)
+             self.driver2_stats_group.setVisible(False)
+        # --- Конец добавления ---
+
+        # Проверка видимости (оставим для контроля)
+        print(f"DEBUG [display_comparison] Group1 visible: {self.driver1_stats_group.isVisible()}, sizeHint: {self.driver1_stats_group.sizeHint()}")
+        print(f"DEBUG [display_comparison] Group2 visible: {self.driver2_stats_group.isVisible()}, sizeHint: {self.driver2_stats_group.sizeHint()}")
+        print(f"DEBUG [display_comparison] Results Container visible: {self.results_container.isVisible()}, sizeHint: {self.results_container.sizeHint()}")
+
+        # Явное обновление (оставим)
+        self.driver1_stats_group.update()
+        self.driver2_stats_group.update()
+        self.results_container.adjustSize()
+        self.results_container.update()
+
     def _get_title(self, stats: dict | None, default_prefix: str, context_str: str) -> str:
         """Формирует заголовок для группы статистики."""
         if not stats:
@@ -277,98 +304,91 @@ class CompareView(QWidget):
 
     def _populate_comparison_grids(self, stats1: dict | None, stats2: dict | None):
         """Заполняет обе сетки (QGridLayout) статистикой, выделяя лучшие значения."""
+        # Отладочный вывод полученных данных
+        print("-" * 20)
+        print(f"DEBUG [populate_grids] stats1: {stats1}")
+        print(f"DEBUG [populate_grids] stats2: {stats2}")
+        print("-" * 20)
+
+        # --- Явная очистка сеток перед заполнением (на всякий случай) ---
+        for grid in [self.driver1_grid, self.driver2_grid]:
+             while grid.count():
+                 child = grid.takeAt(0)
+                 if child.widget():
+                     child.widget().deleteLater()
+        # --- Конец явной очистки ---
 
         stat_map = {
-            "races": ("Гонки", True), # True - больше = лучше
-            "wins": ("Победы", True),
-            "top5": ("Топ-5", True),
-            "top10": ("Топ-10", True),
-            "laps_led": ("Кругов в лидерах", True),
-            "laps_completed": ("Завершено кругов", True),
-            "avg_start": ("Средний старт", False), # False - меньше = лучше
-            "avg_finish": ("Средний финиш", False), # False - меньше = лучше
-            "points": ("Очки", True)
+            "races": ("Гонки", True), "wins": ("Победы", True), "top5": ("Топ-5", True),
+            "top10": ("Топ-10", True), "laps_led": ("Кругов в лидерах", True),
+            "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт", False),
+            "avg_finish": ("Средний финиш", False), "points": ("Очки", True)
         }
-        if stats1 and 'entries' in stats1 or stats2 and 'entries' in stats2: # Для команд/производителей
+        if (stats1 and 'entries' in stats1) or (stats2 and 'entries' in stats2):
              stat_map['entries'] = ("Участий", True)
 
-        # Цвета для выделения
-        default_palette = self.palette() # Получаем стандартную палитру
-        highlight_color = QColor(Qt.darkGreen).lighter(150) # Зеленоватый для лучшего
-        default_text_color = default_palette.color(QPalette.Text)
+        default_palette = self.palette()
+        highlight_color = QColor(Qt.darkGreen).lighter(150)
 
         row = 0
+        any_widget_added = False # Флаг для проверки, добавили ли хоть что-то
         for key, (label_text, more_is_better) in stat_map.items():
-
             val1 = stats1.get(key) if stats1 else None
             val2 = stats2.get(key) if stats2 else None
 
             # Пропускаем строку, если данных нет у обоих
             if val1 is None and val2 is None:
+                # print(f"DEBUG [populate_grids] Skipping key '{key}' (both None)") # Можно раскомментировать для детальной отладки
                 continue
 
             val1_str = self._format_value(val1)
             val2_str = self._format_value(val2)
-
             is_val1_better = False
             is_val2_better = False
-
-            # Логика сравнения
             if val1 is not None and val2 is not None:
                 try:
-                    num_val1 = float(val1)
-                    num_val2 = float(val2)
-                    if more_is_better:
-                        is_val1_better = num_val1 > num_val2
-                        is_val2_better = num_val2 > num_val1
-                    else: # Меньше - лучше (для средних позиций)
-                        is_val1_better = num_val1 < num_val2
-                        is_val2_better = num_val2 < num_val1
-                except (ValueError, TypeError):
-                    pass # Не сравниваем, если не числа
-            elif val1 is not None: # Лучше, если у второго нет данных
-                 is_val1_better = True
-            elif val2 is not None: # Лучше, если у первого нет данных
-                 is_val2_better = True
+                    num_val1 = float(val1); num_val2 = float(val2)
+                    if more_is_better: is_val1_better, is_val2_better = num_val1 > num_val2, num_val2 > num_val1
+                    else: is_val1_better, is_val2_better = num_val1 < num_val2, num_val2 < num_val1
+                except (ValueError, TypeError): pass
+            elif val1 is not None: is_val1_better = True
+            elif val2 is not None: is_val2_better = True
 
-            # Добавляем метку (один раз, выровненную по центру между колонками)
-            # Но проще добавить её в обе колонки
-            label1 = QLabel(label_text + ":")
-            label1.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            value1_label = QLabel(val1_str)
-            value1_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            value1_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            # Создаем виджеты
+            label1 = QLabel(label_text + ":"); label1.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            value1_label = QLabel(val1_str); value1_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); value1_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label2 = QLabel(label_text + ":"); label2.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            value2_label = QLabel(val2_str); value2_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); value2_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-            label2 = QLabel(label_text + ":")
-            label2.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            value2_label = QLabel(val2_str)
-            value2_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            value2_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            # Применяем стиль
+            if is_val1_better: value1_label.setStyleSheet(f"font-weight: bold; color: {highlight_color.name()};")
+            if is_val2_better: value2_label.setStyleSheet(f"font-weight: bold; color: {highlight_color.name()};")
 
-            # Применяем стиль к ЛУЧШЕМУ значению
-            if is_val1_better:
-                value1_label.setStyleSheet(f"font-weight: bold; color: {highlight_color.name()};")
-            if is_val2_better:
-                value2_label.setStyleSheet(f"font-weight: bold; color: {highlight_color.name()};")
-
+            # Добавляем виджеты
             self.driver1_grid.addWidget(label1, row, 0)
             self.driver1_grid.addWidget(value1_label, row, 1)
             self.driver2_grid.addWidget(label2, row, 0)
             self.driver2_grid.addWidget(value2_label, row, 1)
+            any_widget_added = True # Устанавливаем флаг
+            # print(f"DEBUG [populate_grids] Added widgets for key '{key}' at row {row}") # Можно раскомментировать
 
             row += 1
 
         # Обработка случая, если вообще не было данных для сравнения
-        if row == 0:
-            no_data_label1 = QLabel("Нет данных\nдля сравнения.")
-            no_data_label1.setAlignment(Qt.AlignCenter)
-            no_data_label1.setStyleSheet("color: gray;")
+        if not any_widget_added: # Проверяем флаг
+            print("WARN [populate_grids] No comparison data found to display in grids.")
+            no_data_label1 = QLabel("Нет данных\nдля сравнения."); no_data_label1.setAlignment(Qt.AlignCenter); no_data_label1.setStyleSheet("color: gray;")
             self.driver1_grid.addWidget(no_data_label1, 0, 0, 1, 2)
-
-            no_data_label2 = QLabel("Нет данных\nдля сравнения.")
-            no_data_label2.setAlignment(Qt.AlignCenter)
-            no_data_label2.setStyleSheet("color: gray;")
+            no_data_label2 = QLabel("Нет данных\nдля сравнения."); no_data_label2.setAlignment(Qt.AlignCenter); no_data_label2.setStyleSheet("color: gray;")
             self.driver2_grid.addWidget(no_data_label2, 0, 0, 1, 2)
+        else:
+             print(f"DEBUG [populate_grids] Finished loop. Total rows added: {row}")
+
+        # --- Добавляем активацию layout'ов ---
+        print("DEBUG [populate_grids] Activating grids...")
+        self.driver1_grid.activate()
+        self.driver2_grid.activate()
+        # --- Конец добавления ---
 
     def _format_value(self, value):
         """Форматирует значение для отображения."""
@@ -390,35 +410,44 @@ class CompareView(QWidget):
                 if child.widget():
                     child.widget().deleteLater()
 
-        # Очищаем график
-        self.chart_canvas.figure.clear()
-        self.chart_canvas.draw()
-        self.chart_canvas.setVisible(False)
+        # Очищаем и скрываем ВСЕ графики
+        for canvas in [self.career_chart_canvas, self.season_finish_canvas, self.season_points_canvas]:
+            canvas.figure.clear()
+            canvas.draw()
+            canvas.setVisible(False)
 
-        # --- Сбрасываем кэш здесь ---
+        # Сбрасываем кэш
         self.stats1_cache = None
         self.stats2_cache = None
+        self.season_results1_cache = None
+        self.season_results2_cache = None
         # Сброс режима не обязателен, но можно оставить для консистентности
         # self.is_season_mode_cache = False
 
     def draw_comparison_chart(self):
-        """Рисует график сравнения в зависимости от режима."""
+        """Рисует график(и) сравнения в зависимости от режима."""
+        # Сначала скрываем все графики
+        self.career_chart_canvas.setVisible(False)
+        self.season_finish_canvas.setVisible(False)
+        self.season_points_canvas.setVisible(False)
+
         if self.is_season_mode_cache:
-            # TODO: Реализовать графики для сезона (например, линии финишей/очков)
-            self.chart_canvas.setVisible(False) # Пока скрываем для сезона
-            print("Графики для сезона пока не реализованы.")
+            # Рисуем графики сезона
+            self._draw_season_finish_chart(self.stats1_cache, self.stats2_cache, self.season_results1_cache, self.season_results2_cache)
+            self._draw_season_points_chart(self.stats1_cache, self.stats2_cache, self.season_results1_cache, self.season_results2_cache)
         else:
-            # Рисуем бар-чарт для общей статистики
+            # Рисуем график карьеры
             self._draw_overall_bar_chart(self.stats1_cache, self.stats2_cache)
+
+        # Перерисовываем все canvas, чтобы изменения видимости применились
+        self.career_chart_canvas.draw()
+        self.season_finish_canvas.draw()
+        self.season_points_canvas.draw()
 
     def _draw_overall_bar_chart(self, stats1, stats2):
         """Рисует столбчатую диаграмму сравнения основных показателей карьеры."""
-        # print(f"DEBUG: Попытка отрисовки бар-чарта. Stats1: {bool(stats1)}, Stats2: {bool(stats2)}") # Можно убрать
         if not stats1 or not stats2:
-             # print("DEBUG: Скрытие графика, т.к. отсутствуют данные.") # Можно убрать
-             self.chart_canvas.setVisible(False)
-             self.chart_canvas.draw()
-             return
+             return # Данных нет, график остается скрытым
 
         # --- Убираем блок try...except, т.к. причина найдена ---
         # try:
@@ -440,7 +469,7 @@ class CompareView(QWidget):
         x = np.arange(len(labels))
         width = 0.35
 
-        fig = self.chart_canvas.figure
+        fig = self.career_chart_canvas.figure
         # print("DEBUG: Очистка фигуры...") # Можно убрать
         fig.clear()
         ax = fig.add_subplot(111)
@@ -468,8 +497,8 @@ class CompareView(QWidget):
         # print("DEBUG: tight_layout применен.") # Можно убрать
 
         # print("DEBUG: Отрисовка canvas и установка видимости...") # Можно убрать
-        self.chart_canvas.draw()
-        self.chart_canvas.setVisible(True)
+        self.career_chart_canvas.draw()
+        self.career_chart_canvas.setVisible(True)
         # print("DEBUG: График отрисован и показан.") # Можно убрать
 
         # except Exception as e:
@@ -477,10 +506,118 @@ class CompareView(QWidget):
         #     import traceback
         #     traceback.print_exc()
         #     try:
-        #          self.chart_canvas.setVisible(False)
-        #          self.chart_canvas.draw()
+        #          self.career_chart_canvas.setVisible(False)
+        #          self.career_chart_canvas.draw()
         #     except Exception as hide_e:
         #          print(f"!!! Дополнительная ошибка при попытке скрыть canvas: {hide_e}")
+
+    def _draw_season_finish_chart(self, stats1, stats2, results1, results2):
+        """Рисует линейный график сравнения финишных позиций за сезон."""
+        if not results1 and not results2: # Если нет данных ни у одного
+            return # График останется скрытым
+
+        fig = self.season_finish_canvas.figure
+        fig.clear()
+        ax = fig.add_subplot(111)
+
+        name1 = stats1.get('driver_name', 'Гонщик 1') if stats1 else 'Гонщик 1'
+        name2 = stats2.get('driver_name', 'Гонщик 2') if stats2 else 'Гонщик 2'
+
+        all_race_nums = set() # Собираем все номера гонок для оси X
+
+        if results1:
+            race_nums1 = [r[0] for r in results1]
+            finishes1 = [r[2] for r in results1 if r[2] is not None] # Учитываем только фактические финиши
+            # Корректируем race_nums1, если были пропуски финишей
+            race_nums1_valid = [r[0] for r in results1 if r[2] is not None]
+            if finishes1: # Рисуем, только если есть что рисовать
+                ax.plot(race_nums1_valid, finishes1, marker='o', linestyle='-', label=f"{name1} Финиш")
+                all_race_nums.update(race_nums1_valid)
+
+        if results2:
+            race_nums2 = [r[0] for r in results2]
+            finishes2 = [r[2] for r in results2 if r[2] is not None]
+            race_nums2_valid = [r[0] for r in results2 if r[2] is not None]
+            if finishes2:
+                ax.plot(race_nums2_valid, finishes2, marker='s', linestyle='--', label=f"{name2} Финиш")
+                all_race_nums.update(race_nums2_valid)
+
+        if not all_race_nums: # Если никто не финишировал ни разу
+             ax.text(0.5, 0.5, "Нет данных о финишах", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+        else:
+            ax.set_xlabel("Номер гонки в сезоне")
+            ax.set_ylabel("Финишная позиция")
+            ax.set_title("Сравнение финишных позиций по гонкам")
+            ax.invert_yaxis() # Меньше позиция = выше на графике
+            ax.legend()
+            ax.grid(True, axis='y', linestyle=':') # Сетка по оси Y
+            # Устанавливаем целые числа на оси X, если гонок немного
+            if len(all_race_nums) > 0:
+                 max_race = max(all_race_nums)
+                 if max_race <= 40: # Примерный порог
+                     ax.set_xticks(sorted(list(all_race_nums)))
+
+        # --- Сначала вызываем tight_layout ---
+        fig.tight_layout()
+        # --- Затем увеличиваем нижний отступ ЕЩЕ БОЛЬШЕ ---
+        fig.subplots_adjust(bottom=0.25) # <--- Изменено на 0.25 и вызвано ПОСЛЕ tight_layout
+        # --- Конец изменения ---
+
+        self.season_finish_canvas.draw() # Перерисовываем после изменений
+        self.season_finish_canvas.setVisible(True)
+
+    def _draw_season_points_chart(self, stats1, stats2, results1, results2):
+        """Рисует линейный график сравнения набранных очков по гонкам за сезон."""
+        if not results1 and not results2:
+            return
+
+        fig = self.season_points_canvas.figure
+        fig.clear()
+        ax = fig.add_subplot(111)
+
+        name1 = stats1.get('driver_name', 'Гонщик 1') if stats1 else 'Гонщик 1'
+        name2 = stats2.get('driver_name', 'Гонщик 2') if stats2 else 'Гонщик 2'
+
+        all_race_nums = set()
+
+        if results1:
+            # Используем 4-й элемент (индекс 3) - очки
+            race_nums1 = [r[0] for r in results1]
+            points1 = [r[3] for r in results1 if r[3] is not None]
+            race_nums1_valid = [r[0] for r in results1 if r[3] is not None]
+            if points1:
+                ax.plot(race_nums1_valid, points1, marker='o', linestyle='-', label=f"{name1} Очки")
+                all_race_nums.update(race_nums1_valid)
+
+        if results2:
+            race_nums2 = [r[0] for r in results2]
+            points2 = [r[3] for r in results2 if r[3] is not None]
+            race_nums2_valid = [r[0] for r in results2 if r[3] is not None]
+            if points2:
+                ax.plot(race_nums2_valid, points2, marker='s', linestyle='--', label=f"{name2} Очки")
+                all_race_nums.update(race_nums2_valid)
+
+        if not all_race_nums:
+             ax.text(0.5, 0.5, "Нет данных об очках", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+        else:
+            ax.set_xlabel("Номер гонки в сезоне")
+            ax.set_ylabel("Набранные очки")
+            ax.set_title("Сравнение набранных очков по гонкам")
+            ax.legend()
+            ax.grid(True, axis='y', linestyle=':')
+            if len(all_race_nums) > 0:
+                 max_race = max(all_race_nums)
+                 if max_race <= 40:
+                     ax.set_xticks(sorted(list(all_race_nums)))
+
+        # --- Сначала вызываем tight_layout ---
+        fig.tight_layout()
+        # --- Затем увеличиваем нижний отступ ЕЩЕ БОЛЬШЕ ---
+        fig.subplots_adjust(bottom=0.25) # <--- Изменено на 0.25 и вызвано ПОСЛЕ tight_layout
+        # --- Конец изменения ---
+
+        self.season_points_canvas.draw() # Перерисовываем после изменений
+        self.season_points_canvas.setVisible(True)
 
     # Метод для обновления данных, если контекст изменится (пока не используется)
     # def update_context(self, season: int, series: str):
