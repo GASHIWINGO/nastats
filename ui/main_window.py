@@ -14,6 +14,7 @@ from views.team_list_view import TeamListView
 from views.team_details_view import TeamDetailsView
 from views.manufacturer_list_view import ManufacturerListView
 from views.manufacturer_details_view import ManufacturerDetailsView
+from views.compare_view import CompareView
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +53,17 @@ class MainWindow(QMainWindow):
 
     def handle_navigation(self, page_key: str):
         if self.current_view:
+            if isinstance(self.current_view, CompareView) and page_key == "compare":
+                return
+            if isinstance(self.current_view, RaceListView) and page_key == "races":
+                return
+            if isinstance(self.current_view, DriverListView) and page_key == "drivers":
+                return
+            if isinstance(self.current_view, TeamListView) and page_key == "teams":
+                return
+            if isinstance(self.current_view, ManufacturerListView) and page_key == "manufacturers":
+                return
+
             self.content_layout.removeWidget(self.current_view)
             self.current_view.deleteLater()
             self.current_view = None
@@ -75,6 +87,9 @@ class MainWindow(QMainWindow):
         elif page_key == "manufacturers":
             view = ManufacturerListView(season, series)
             view.manufacturer_selected.connect(self.show_manufacturer_details)
+
+        elif page_key == "compare":
+            view = CompareView()
 
         else:
             view = QLabel(f"Страница: {page_key}")

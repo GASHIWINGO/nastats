@@ -872,6 +872,25 @@ def get_manufacturer_wins_by_season(manufacturer_id: int):
             logger.error(f"Ошибка при получении побед производителя по сезонам: {e}", exc_info=True)
             return []
 
+def get_all_drivers_list():
+    """Получает список всех гонщиков (ID, Имя) для использования в UI."""
+    logger.info("Запрос списка всех гонщиков...")
+    if drivers_table is None:
+        logger.error("Таблица Drivers не отражена.")
+        return []
+    with get_db_session() as session:
+        try:
+            stmt = select(
+                drivers_table.c.driver_id,
+                drivers_table.c.driver_name
+            ).order_by(asc(drivers_table.c.driver_name))
+            results = session.execute(stmt).fetchall()
+            logger.info(f"Найдено {len(results)} гонщиков.")
+            # Возвращаем список кортежей (id, name)
+            return results
+        except Exception as e:
+            logger.error(f"Ошибка получения списка всех гонщиков: {e}", exc_info=True)
+            return []
 
 # --- Конец адаптации функций ---
 
@@ -1017,3 +1036,15 @@ if __name__ == '__main__':
              print("Не удалось получить общую статистику.")
     else:
         print(f"ID для '{target_manu_overall_name}' не найден, пропускаем тест.")
+
+    print("\n--- Тест получения списка гонщиков ---")
+    all_drivers = get_all_drivers_list()
+    print(f"Получено гонщиков: {len(all_drivers)}")
+    if len(all_drivers) > 5:
+        print("Первые 5 гонщиков:")
+        for driver_id, driver_name in all_drivers[:5]:
+            print(f"  ID: {driver_id}, Имя: {driver_name}")
+    elif all_drivers:
+        print("Гонщики:")
+        for driver_id, driver_name in all_drivers:
+            print(f"  ID: {driver_id}, Имя: {driver_name}")
