@@ -895,6 +895,26 @@ def get_all_drivers_list():
             logger.error(f"Ошибка получения списка всех гонщиков: {e}", exc_info=True)
             return []
 
+def get_all_teams_list():
+    """Получает список всех команд (ID, Имя) для использования в UI."""
+    logger.info("Запрос списка всех команд...")
+    if teams_table is None:
+        logger.error("Таблица Teams не отражена.")
+        return []
+    with get_db_session() as session:
+        try:
+            stmt = select(
+                teams_table.c.team_id,
+                teams_table.c.team_name
+            ).order_by(asc(teams_table.c.team_name))
+            results = session.execute(stmt).fetchall()
+            logger.info(f"Найдено {len(results)} команд.")
+            # Возвращаем список кортежей (id, name)
+            return results
+        except Exception as e:
+            logger.error(f"Ошибка получения списка всех команд: {e}", exc_info=True)
+            return []
+
 # --- Конец адаптации функций ---
 
 if __name__ == '__main__':
@@ -1051,3 +1071,11 @@ if __name__ == '__main__':
         print("Гонщики:")
         for driver_id, driver_name in all_drivers:
             print(f"  ID: {driver_id}, Имя: {driver_name}")
+
+    print("\n--- Тест получения списка команд ---")
+    all_teams = get_all_teams_list()
+    print(f"Получено команд: {len(all_teams)}")
+    if len(all_teams) > 5:
+        print("Первые 5 команд:")
+        for team_id, team_name in all_teams[:5]:
+            print(f"  ID: {team_id}, Имя: {team_name}")
