@@ -568,7 +568,7 @@ class CompareView(QWidget):
 
         # print("DEBUG: Отрисовка столбцов...") # Можно убрать
         rects1 = ax.bar(x - width/2, values1, width, label=name1)
-        rects2 = ax.bar(x + width/2, values2, width, label=name2)
+        rects2 = ax.bar(x + width/2, values2, width, label=name2, color='deeppink')
         # print("DEBUG: Столбцы отрисованы.") # Можно убрать
 
         ax.set_ylabel('Значение')
@@ -630,7 +630,7 @@ class CompareView(QWidget):
             finishes2 = [r[2] for r in results2 if r[2] is not None]
             race_nums2_valid = [r[0] for r in results2 if r[2] is not None]
             if finishes2:
-                ax.plot(race_nums2_valid, finishes2, marker='s', linestyle='--', label=f"{name2} Финиш")
+                ax.plot(race_nums2_valid, finishes2, marker='s', linestyle='--', label=f"{name2} Финиш", color='deeppink')
                 all_race_nums.update(race_nums2_valid)
 
         if not all_race_nums: # Если никто не финишировал ни разу
@@ -685,7 +685,7 @@ class CompareView(QWidget):
             points2 = [r[3] for r in results2 if r[3] is not None]
             race_nums2_valid = [r[0] for r in results2 if r[3] is not None]
             if points2:
-                ax.plot(race_nums2_valid, points2, marker='s', linestyle='--', label=f"{name2} Очки")
+                ax.plot(race_nums2_valid, points2, marker='s', linestyle='--', label=f"{name2} Очки", color='deeppink')
                 all_race_nums.update(race_nums2_valid)
 
         if not all_race_nums:
@@ -704,7 +704,7 @@ class CompareView(QWidget):
         # --- Сначала вызываем tight_layout ---
         fig.tight_layout()
         # --- Затем увеличиваем нижний отступ ЕЩЕ БОЛЬШЕ ---
-        fig.subplots_adjust(bottom=0.25) # <--- Изменено на 0.25 и вызвано ПОСЛЕ tight_layout
+        fig.subplots_adjust(bottom=0.20) # <--- Изменено на 0.20 и вызвано ПОСЛЕ tight_layout
         # --- Конец изменения ---
 
         self.season_points_canvas.draw() # Перерисовываем после изменений
@@ -738,7 +738,7 @@ class CompareView(QWidget):
             avg_finishes2 = [r[2] for r in results2 if r[2] is not None]
             race_nums2_valid = [r[0] for r in results2 if r[2] is not None]
             if avg_finishes2:
-                ax.plot(race_nums2_valid, avg_finishes2, marker='s', linestyle='--', label=f"{name2} Ср.Финиш")
+                ax.plot(race_nums2_valid, avg_finishes2, marker='s', linestyle='--', label=f"{name2} Ср.Финиш", color='deeppink')
                 all_race_nums.update(race_nums2_valid)
 
         if not all_race_nums:
@@ -785,7 +785,7 @@ class CompareView(QWidget):
         ax = fig.add_subplot(111)
 
         rects1 = ax.bar(x - width/2, values1, width, label=name1)
-        rects2 = ax.bar(x + width/2, values2, width, label=name2)
+        rects2 = ax.bar(x + width/2, values2, width, label=name2, color='deeppink')
 
         ax.set_ylabel('Значение')
         ax.set_title('Сравнение статистики команд за карьеру') # Меняем заголовок
@@ -820,24 +820,24 @@ class CompareView(QWidget):
         x = np.arange(len(labels))
         width = 0.35
 
-        fig = self.career_chart_canvas.figure # Используем тот же canvas
+        fig = self.career_chart_canvas.figure
         fig.clear()
         ax = fig.add_subplot(111)
 
         rects1 = ax.bar(x - width/2, values1, width, label=name1)
-        rects2 = ax.bar(x + width/2, values2, width, label=name2)
+        rects2 = ax.bar(x + width/2, values2, width, label=name2, color='deeppink')
 
         ax.set_ylabel('Значение')
-        ax.set_title('Сравнение статистики производителей за карьеру') # Меняем заголовок
+        ax.set_title('Сравнение статистики производителей за карьеру')
         ax.set_xticks(x)
         ax.set_xticklabels(labels)
         ax.legend()
         ax.bar_label(rects1, padding=3, fmt='%g')
         ax.bar_label(rects2, padding=3, fmt='%g')
-        fig.tight_layout() # Вызываем перед subplots_adjust
+        fig.tight_layout()
         fig.subplots_adjust(bottom=0.15) # Даем место подписям (можно меньше, чем для сезонных)
-        self.career_chart_canvas.draw() # Перерисовываем
-        self.career_chart_canvas.setVisible(True) # Показываем график
+        self.career_chart_canvas.draw()
+        self.career_chart_canvas.setVisible(True)
 
     # Метод для обновления данных, если контекст изменится (пока не используется)
     # def update_context(self, season: int, series: str):
