@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QGroupBox, QScrollArea, QFrame, QComboBox, QRadioButton,
     QSpacerItem, QSizePolicy, QCompleter, QButtonGroup
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QThread, QObject, Signal
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QColor, QPalette
 import db_sync
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -28,6 +28,75 @@ class IdNameItemModel(QStandardItemModel):
                  return item.data(Qt.UserRole)
         return None # Возвращаем None, если индекс невалиден или элемента нет
 
+# Worker для фоновых задач БД
+class DbWorker(QObject):
+    """Выполняет запросы к БД в фоновом потоке."""
+    # Сигнал с результатом: словарь со статистикой и результатами сезона
+    result_ready = Signal(dict)
+    # Сигнал ошибки
+    error_occurred = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def run(self, entity_type, is_season_mode, id1, id2, season, series):
+        """Запускает загрузку данных для сравнения."""
+        print(f"DEBUG [DbWorker]: Starting task - Type: {entity_type}, Season Mode: {is_season_mode}, ID1: {id1}, ID2: {id2}, Season: {season}, Series: {series}")
+        try:
+            results = {
+                'stats1': None,
+                'stats2': None,
+                'season_results1': None,
+                'season_results2': None
+            }
+            series_id = None
+            if is_season_mode:
+                # Получаем series_id только один раз
+                with db_sync.get_db_session() as session:
+                    series_id = db_sync.get_series_id_by_name(session, series)
+                if not series_id:
+                    raise ValueError(f"Серия '{series}' не найдена в БД.")
+
+            if entity_type == "driver":
+                if is_season_mode:
+                    results['stats1'] = db_sync.get_driver_season_details(id1, season, series)
+                    results['stats2'] = db_sync.get_driver_season_details(id2, season, series)
+                    results['season_results1'] = db_sync.get_driver_race_results_for_season(id1, season, series_id)
+                    results['season_results2'] = db_sync.get_driver_race_results_for_season(id2, season, series_id)
+                else:
+                    results['stats1'] = db_sync.get_overall_driver_stats(id1)
+                    results['stats2'] = db_sync.get_overall_driver_stats(id2)
+            elif entity_type == "team":
+                if is_season_mode:
+                    results['stats1'] = db_sync.get_team_season_details(id1, season, series)
+                    results['stats2'] = db_sync.get_team_season_details(id2, season, series)
+                    results['season_results1'] = db_sync.get_team_race_results_for_season(id1, season, series_id)
+                    results['season_results2'] = db_sync.get_team_race_results_for_season(id2, season, series_id)
+                else:
+                    results['stats1'] = db_sync.get_overall_team_stats(id1)
+                    results['stats2'] = db_sync.get_overall_team_stats(id2)
+            elif entity_type == "manufacturer":
+                if is_season_mode:
+                    # Получаем статистику ВСЕХ производителей за сезон
+                    all_manu_stats = db_sync.get_manufacturer_season_stats(season, series)
+                    # Находим нужных нам по ID
+                    results['stats1'] = next((m for m in all_manu_stats if m.get('manufacturer_id') == id1), None)
+                    results['stats2'] = next((m for m in all_manu_stats if m.get('manufacturer_id') == id2), None)
+                    # Сезонных графиков для производителей пока нет
+                else:
+                    results['stats1'] = db_sync.get_overall_manufacturer_stats(id1)
+                    results['stats2'] = db_sync.get_overall_manufacturer_stats(id2)
+
+            print(f"DEBUG [DbWorker]: Task finished successfully. Emitting result_ready.")
+            self.result_ready.emit(results)
+
+        except Exception as e:
+            error_msg = f"Ошибка при фоновой загрузке данных: {e}"
+            print(f"ERROR [DbWorker]: {error_msg}")
+            import traceback
+            traceback.print_exc() # Выводим полный traceback в консоль для отладки
+            self.error_occurred.emit(error_msg)
+
 class CompareView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,6 +111,8 @@ class CompareView(QWidget):
         # Кэши выбранного типа/режима
         self.current_entity_type = "driver"
         self.is_season_mode_cache = False
+        self.db_thread = None # Для хранения потока
+        self.db_worker = None # Для хранения worker'а
 
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(15, 15, 15, 15)
@@ -265,11 +336,14 @@ class CompareView(QWidget):
         self.layout.addWidget(self.scroll_area, stretch=1)
 
     def load_comparison_data(self):
+        """Запускает загрузку данных сравнения в фоновом потоке."""
+        # --- 1. Проверки и получение параметров (как раньше) ---
         self.clear_results()
         idx1 = self.entity1_combo.currentIndex()
         idx2 = self.entity2_combo.currentIndex()
 
         if idx1 < 0 or idx2 < 0:
+            # Можно показать сообщение пользователю через QMessageBox
             print(f"Ошибка: Выберите обе(их) {self.current_entity_type}.")
             return
 
@@ -280,66 +354,93 @@ class CompareView(QWidget):
 
         if not id1 or not id2 or id1 == id2:
             print(f"Ошибка: Выберите две разные сущности ({self.current_entity_type}).")
+            # Можно показать сообщение пользователю
             return
 
         is_season_mode = self.season_radio.isChecked()
         season = int(self.season_combo.currentText()) if is_season_mode else None
         series = self.series_combo.currentText() if is_season_mode else None
-        self.is_season_mode_cache = is_season_mode
-        series_id = None
+        self.is_season_mode_cache = is_season_mode # Кэшируем режим для отрисовки графиков
+
+        # --- 2. Настройка и запуск фоновой задачи ---
+        # Если предыдущий поток еще работает, нужно его остановить (или не запускать новый)
+        # Простой вариант: просто не запускать новый, если кнопка неактивна
+        if not self.compare_button.isEnabled():
+            print("INFO: Загрузка данных уже выполняется.")
+            return
+
+        self.compare_button.setEnabled(False)
+        self.compare_button.setText("Загрузка...") # Индикатор
+
+        # Создаем поток и worker'а
+        self.db_thread = QThread()
+        self.db_worker = DbWorker() # Создаем экземпляр нашего worker'а
+        self.db_worker.moveToThread(self.db_thread) # Перемещаем worker'а в поток
+
+        # Подключаем сигналы worker'а к слотам CompareView
+        self.db_worker.result_ready.connect(self._on_comparison_data_ready)
+        self.db_worker.error_occurred.connect(self._on_db_error)
+
+        # Подключаем сигналы потока для запуска и очистки
+        # Запускаем run worker'а, когда поток стартует
+        self.db_thread.started.connect(lambda: self.db_worker.run(
+            self.current_entity_type, is_season_mode, id1, id2, season, series
+        ))
+        # Завершаем поток, когда worker закончил (успешно или с ошибкой)
+        self.db_worker.result_ready.connect(self.db_thread.quit)
+        self.db_worker.error_occurred.connect(self.db_thread.quit)
+        # Удаляем worker'а и поток после завершения потока
+        self.db_thread.finished.connect(self.db_worker.deleteLater)
+        self.db_thread.finished.connect(self.db_thread.deleteLater)
+        # Сбрасываем ссылки на поток и worker'а после удаления
+        self.db_thread.finished.connect(self._reset_thread_worker)
+
+        print("DEBUG: Запуск фонового потока для загрузки данных...")
+        self.db_thread.start() # Запускаем поток
+
+    def _on_comparison_data_ready(self, results_dict):
+        """Слот для обработки результатов, полученных из фонового потока."""
+        print("DEBUG: Получены результаты из фонового потока.")
+        # Восстанавливаем состояние кнопки
+        self.compare_button.setEnabled(True)
+        self.compare_button.setText("Сравнить")
+
+        # Обновляем кэши в основном потоке
+        self.stats1_cache = results_dict.get('stats1')
+        self.stats2_cache = results_dict.get('stats2')
+        self.season_results1_cache = results_dict.get('season_results1')
+        self.season_results2_cache = results_dict.get('season_results2')
+
+        # Формируем контекстную строку (как раньше)
         context_str = ""
-        # Сбрасываем кэши перед загрузкой
-        self.stats1_cache = None
-        self.stats2_cache = None
-        self.season_results1_cache = None
-        self.season_results2_cache = None
+        if self.is_season_mode_cache:
+            season = int(self.season_combo.currentText())
+            series = self.series_combo.currentText()
+            context_str = f"{series} {season}"
+        else:
+            context_str = "Карьера"
 
-        # --- Выбираем функции загрузки данных в зависимости от типа сущности ---
-        if self.current_entity_type == "driver":
-            if is_season_mode:
-                with db_sync.get_db_session() as session: series_id = db_sync.get_series_id_by_name(session, series)
-                if not series_id: print(f"Ошибка: Серия '{series}' не найдена."); return
-                self.stats1_cache = db_sync.get_driver_season_details(id1, season, series)
-                self.stats2_cache = db_sync.get_driver_season_details(id2, season, series)
-                self.season_results1_cache = db_sync.get_driver_race_results_for_season(id1, season, series_id)
-                self.season_results2_cache = db_sync.get_driver_race_results_for_season(id2, season, series_id)
-                context_str = f"{series} {season}"
-            else:
-                self.stats1_cache = db_sync.get_overall_driver_stats(id1)
-                self.stats2_cache = db_sync.get_overall_driver_stats(id2)
-                context_str = "Карьера"
-        elif self.current_entity_type == "team":
-            if is_season_mode:
-                with db_sync.get_db_session() as session: series_id = db_sync.get_series_id_by_name(session, series)
-                if not series_id: print(f"Ошибка: Серия '{series}' не найдена."); return
-                self.stats1_cache = db_sync.get_team_season_details(id1, season, series)
-                self.stats2_cache = db_sync.get_team_season_details(id2, season, series)
-                # --- Загружаем данные для сезонных графиков команд ---
-                self.season_results1_cache = db_sync.get_team_race_results_for_season(id1, season, series_id)
-                self.season_results2_cache = db_sync.get_team_race_results_for_season(id2, season, series_id)
-                context_str = f"{series} {season}"
-            else:
-                self.stats1_cache = db_sync.get_overall_team_stats(id1)
-                self.stats2_cache = db_sync.get_overall_team_stats(id2)
-                context_str = "Карьера"
-        elif self.current_entity_type == "manufacturer":
-            if is_season_mode:
-                # Получаем статистику ВСЕХ производителей за сезон
-                all_manu_stats = db_sync.get_manufacturer_season_stats(season, series)
-                # Находим нужных нам по ID
-                self.stats1_cache = next((m for m in all_manu_stats if m.get('manufacturer_id') == id1), None)
-                self.stats2_cache = next((m for m in all_manu_stats if m.get('manufacturer_id') == id2), None)
-                # Сезонных графиков для производителей пока нет
-                self.season_results1_cache = None
-                self.season_results2_cache = None
-                context_str = f"{series} {season}"
-            else:
-                self.stats1_cache = db_sync.get_overall_manufacturer_stats(id1)
-                self.stats2_cache = db_sync.get_overall_manufacturer_stats(id2)
-                context_str = "Карьера"
-
+        # Обновляем UI (эти методы теперь работают с кэшами)
         self.display_comparison(self.stats1_cache, self.stats2_cache, context_str)
         self.draw_comparison_chart()
+        print("DEBUG: UI обновлен результатами.")
+
+    def _on_db_error(self, error_message):
+        """Слот для обработки ошибок из фонового потока."""
+        print(f"ERROR: Ошибка в фоновом потоке: {error_message}")
+        # Восстанавливаем состояние кнопки
+        self.compare_button.setEnabled(True)
+        self.compare_button.setText("Сравнить")
+        # Опционально: показать сообщение пользователю
+        # QMessageBox.critical(self, "Ошибка базы данных", f"Не удалось загрузить данные:\n{error_message}")
+        # Очищаем результаты, если произошла ошибка
+        self.clear_results()
+
+    def _reset_thread_worker(self):
+        """Сбрасывает ссылки на поток и worker после их удаления."""
+        print("DEBUG: Очистка ссылок на поток и worker.")
+        self.db_thread = None
+        self.db_worker = None
 
     def display_comparison(self, stats1, stats2, context_str: str):
         # --- Очистка теперь в load_comparison_data ---
