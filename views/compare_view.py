@@ -113,6 +113,8 @@ class CompareView(QWidget):
         self.is_season_mode_cache = False
         self.db_thread = None # Для хранения потока
         self.db_worker = None # Для хранения worker'а
+        self.grid1_labels = {} # Словарь для хранения меток первой сетки {key: (label_widget, value_widget)}
+        self.grid2_labels = {} # Словарь для хранения меток второй сетки
 
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(15, 15, 15, 15)
@@ -287,52 +289,110 @@ class CompareView(QWidget):
         self.series_label.setVisible(is_season_mode)
         self.series_combo.setVisible(is_season_mode)
 
+    def _determine_stat_map(self):
+        """Возвращает карту статистики в зависимости от текущего типа сущности."""
+        if self.current_entity_type == "driver":
+            return {
+                "races": ("Гонки", True), "wins": ("Победы", True), "top5": ("Топ-5", True),
+                "top10": ("Топ-10", True), "laps_led": ("Кругов в лидерах", True),
+                "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт", False),
+                "avg_finish": ("Средний финиш", False), "points": ("Очки", True)
+            }
+        elif self.current_entity_type == "team":
+            return {
+                "entries": ("Участий", True), "wins": ("Победы", True), "top5": ("Топ-5", True),
+                "top10": ("Топ-10", True), "laps_led": ("Кругов в лидерах", True),
+                "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт (команды)", False),
+                "avg_finish": ("Средний финиш (команды)", False), "points": ("Очки (команды)", True)
+            }
+        elif self.current_entity_type == "manufacturer":
+            return {
+                "entries": ("Участий", True),
+                "wins": ("Победы", True),
+                "top5": ("Топ-5", True),
+                "top10": ("Топ-10", True),
+                "laps_led": ("Круги\nлидерства", True)
+            }
+        else:
+            return {} # По умолчанию пусто
+
     def setup_results_ui(self):
+        # 1. Создаем QScrollArea
         self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setWidgetResizable(True) # Важно, чтобы внутренний виджет мог изменять размер
+        self.scroll_area.setFrameShape(QFrame.NoFrame) # Убираем рамку
 
+        # 2. Создаем виджет-контейнер, который будет ВНУТРИ QScrollArea
         self.results_container = QWidget()
+        # 3. Создаем ГЛАВНЫЙ ВЕРТИКАЛЬНЫЙ layout для этого контейнера
         self.results_main_layout = QVBoxLayout(self.results_container)
+        self.results_main_layout.setContentsMargins(5, 5, 5, 5) # Небольшие отступы внутри контейнера
         self.results_main_layout.setSpacing(20)
+        # 4. Устанавливаем контейнер как виджет для QScrollArea
+        self.scroll_area.setWidget(self.results_container)
 
-        # --- Статистика (как и раньше) ---
+        # --- Статистика ---
+        # 5. Создаем ГОРИЗОНТАЛЬНЫЙ layout для размещения двух групп статистики
         self.stats_layout = QHBoxLayout()
-        self.driver1_stats_group = QGroupBox("Гонщик 1")
-        self.driver1_grid = QGridLayout(self.driver1_stats_group)
+        self.stats_layout.setSpacing(15)
+
+        # 6. Создаем GroupBox'ы БЕЗ явного родителя
+        self.driver1_stats_group = QGroupBox("Сущность 1")
+        self.driver1_grid = QGridLayout(self.driver1_stats_group) # Grid является layout'ом для этой группы
         self.driver1_stats_group.setMinimumWidth(350)
 
-        self.driver2_stats_group = QGroupBox("Гонщик 2")
-        self.driver2_grid = QGridLayout(self.driver2_stats_group)
+        self.driver2_stats_group = QGroupBox("Сущность 2")
+        self.driver2_grid = QGridLayout(self.driver2_stats_group) # Grid является layout'ом для этой группы
         self.driver2_stats_group.setMinimumWidth(350)
 
+        # 7. Предсоздаем метки и добавляем их в grid'ы (как в прошлый раз)
+        possible_keys_map = { # Определяем статически
+            "races": ("Гонки", True), "wins": ("Победы", True), "top5": ("Топ-5", True),
+            "top10": ("Топ-10", True), "laps_led": ("Кругов в лидерах", True),
+            "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт", False),
+            "avg_finish": ("Средний финиш", False), "points": ("Очки", True),
+            "entries": ("Участий", True)
+        }
+        self.grid1_labels.clear()
+        self.grid2_labels.clear()
+        row = 0
+        for key, (label_text, _) in possible_keys_map.items():
+            clean_label_text = label_text.replace("\n", " ").replace("(команды)", "").strip() + ":"
+            # Метки для первой сетки
+            label1_widget = QLabel(clean_label_text); label1_widget.setAlignment(Qt.AlignRight | Qt.AlignVCenter); label1_widget.setVisible(False)
+            value1_widget = QLabel("-"); value1_widget.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); value1_widget.setTextInteractionFlags(Qt.TextSelectableByMouse); value1_widget.setVisible(False)
+            self.driver1_grid.addWidget(label1_widget, row, 0); self.driver1_grid.addWidget(value1_widget, row, 1)
+            self.grid1_labels[key] = (label1_widget, value1_widget)
+            # Метки для второй сетки
+            label2_widget = QLabel(clean_label_text); label2_widget.setAlignment(Qt.AlignRight | Qt.AlignVCenter); label2_widget.setVisible(False)
+            value2_widget = QLabel("-"); value2_widget.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); value2_widget.setTextInteractionFlags(Qt.TextSelectableByMouse); value2_widget.setVisible(False)
+            self.driver2_grid.addWidget(label2_widget, row, 0); self.driver2_grid.addWidget(value2_widget, row, 1)
+            self.grid2_labels[key] = (label2_widget, value2_widget)
+            row += 1
+
+        # 8. Добавляем GroupBox'ы в горизонтальный stats_layout
         self.stats_layout.addWidget(self.driver1_stats_group)
         self.stats_layout.addWidget(self.driver2_stats_group)
         self.stats_layout.addStretch()
 
-        # Добавляем layout статистики в основной вертикальный layout
+        # 9. Добавляем stats_layout (с группами внутри) в results_main_layout контейнера
         self.results_main_layout.addLayout(self.stats_layout)
 
         # --- Графики ---
-        # Убираем аргумент parent
-        self.career_chart_canvas = FigureCanvas(Figure(figsize=(8, 4))) # <-- Убран parent
-        self.career_chart_canvas.setVisible(False)
-        self.career_chart_canvas.setMinimumHeight(250)
+        # 10. Создаем графики и добавляем их в results_main_layout контейнера
+        self.career_chart_canvas = FigureCanvas(Figure(figsize=(8, 4)))
+        self.career_chart_canvas.setVisible(False); self.career_chart_canvas.setMinimumHeight(250)
         self.results_main_layout.addWidget(self.career_chart_canvas)
 
-        # Убираем аргумент parent
-        self.season_finish_canvas = FigureCanvas(Figure(figsize=(8, 4))) # <-- Убран parent
-        self.season_finish_canvas.setVisible(False)
-        self.season_finish_canvas.setMinimumHeight(250)
+        self.season_finish_canvas = FigureCanvas(Figure(figsize=(8, 4)))
+        self.season_finish_canvas.setVisible(False); self.season_finish_canvas.setMinimumHeight(250)
         self.results_main_layout.addWidget(self.season_finish_canvas)
 
-        # Убираем аргумент parent
-        self.season_points_canvas = FigureCanvas(Figure(figsize=(8, 4))) # <-- Убран parent
-        self.season_points_canvas.setVisible(False)
-        self.season_points_canvas.setMinimumHeight(250)
+        self.season_points_canvas = FigureCanvas(Figure(figsize=(8, 4)))
+        self.season_points_canvas.setVisible(False); self.season_points_canvas.setMinimumHeight(250)
         self.results_main_layout.addWidget(self.season_points_canvas)
 
-        self.scroll_area.setWidget(self.results_container)
+        # 11. Наконец, добавляем QScrollArea (со всем содержимым) в ОСНОВНОЙ layout виджета CompareView
         self.layout.addWidget(self.scroll_area, stretch=1)
 
     def load_comparison_data(self):
@@ -476,107 +536,101 @@ class CompareView(QWidget):
         return f"{name} — {context_str}"
 
     def _populate_comparison_grids(self, stats1: dict | None, stats2: dict | None):
-        """Заполняет обе сетки (QGridLayout) статистикой, выделяя лучшие значения."""
-        # Отладочный вывод полученных данных
+        """Заполняет обе сетки (QGridLayout) статистикой, обновляя существующие QLabel."""
+        # Отладочный вывод
         print("-" * 20)
-        print(f"DEBUG [populate_grids] stats1: {stats1}")
-        print(f"DEBUG [populate_grids] stats2: {stats2}")
+        print(f"DEBUG [populate_grids] Updating grids. stats1: {bool(stats1)}, stats2: {bool(stats2)}")
         print("-" * 20)
 
-        # --- Явная очистка сеток перед заполнением (на всякий случай) ---
-        for grid in [self.driver1_grid, self.driver2_grid]:
-             while grid.count():
-                 child = grid.takeAt(0)
-                 if child.widget():
-                     child.widget().deleteLater()
-        # --- Конец явной очистки ---
+        # Получаем актуальную карту для текущего типа сущности
+        stat_map = self._determine_stat_map()
+        if not stat_map:
+            print("WARN [populate_grids] No stat map determined for current entity type.")
+            # Скрываем все метки на всякий случай
+            for key in self.grid1_labels:
+                label1, value1 = self.grid1_labels[key]
+                label2, value2 = self.grid2_labels[key]
+                label1.setVisible(False)
+                value1.setVisible(False)
+                label2.setVisible(False)
+                value2.setVisible(False)
+            return
 
-        stat_map = {}
-        if self.current_entity_type == "driver":
-            stat_map = {
-                "races": ("Гонки", True), "wins": ("Победы", True), "top5": ("Топ-5", True),
-                "top10": ("Топ-10", True), "laps_led": ("Кругов в лидерах", True),
-                "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт", False),
-                "avg_finish": ("Средний финиш", False), "points": ("Очки", True)
-            }
-        elif self.current_entity_type == "team":
-             stat_map = {
-                "entries": ("Участий", True), "wins": ("Победы", True), "top5": ("Топ-5", True),
-                "top10": ("Топ-10", True), "laps_led": ("Кругов в лидерах", True),
-                "laps_completed": ("Завершено кругов", True), "avg_start": ("Средний старт (команды)", False),
-                "avg_finish": ("Средний финиш (команды)", False), "points": ("Очки (команды)", True)
-            }
-        elif self.current_entity_type == "manufacturer":
-            stat_map = {
-                "entries": ("Участий", True),
-                "wins": ("Победы", True),
-                "top5": ("Топ-5", True),
-                "top10": ("Топ-10", True),
-                "laps_led": ("Круги\nлидерства", True)
-            }
-
-        default_palette = self.palette()
+        # Стили
+        default_style = "" # Обычный стиль по умолчанию (можно взять из темы, но пока пустой)
         highlight_color = QColor(Qt.darkGreen).lighter(150)
+        highlight_style = f"font-weight: bold; color: {highlight_color.name()};"
 
-        row = 0
-        any_widget_added = False # Флаг для проверки, добавили ли хоть что-то
-        for key, (label_text, more_is_better) in stat_map.items():
-            val1 = stats1.get(key) if stats1 else None
-            val2 = stats2.get(key) if stats2 else None
+        any_widget_shown = False
+        # Проходим по всем возможным меткам, которые мы создали
+        for key, (label1_widget, value1_widget) in self.grid1_labels.items():
+            label2_widget, value2_widget = self.grid2_labels[key]
 
-            # Пропускаем строку, если данных нет у обоих
-            if val1 is None and val2 is None:
-                # print(f"DEBUG [populate_grids] Skipping key '{key}' (both None)") # Можно раскомментировать для детальной отладки
-                continue
+            # Проверяем, есть ли этот ключ в ТЕКУЩЕЙ карте статистики
+            if key in stat_map:
+                label_text, more_is_better = stat_map[key]
+                # Корректируем текст основной метки, если нужно (например, для команд)
+                clean_label_text = label_text.replace("\n", " ").replace("(команды)", "").strip() + ":"
+                label1_widget.setText(clean_label_text)
+                label2_widget.setText(clean_label_text)
 
-            val1_str = self._format_value(val1)
-            val2_str = self._format_value(val2)
-            is_val1_better = False
-            is_val2_better = False
-            if val1 is not None and val2 is not None:
-                try:
-                    num_val1 = float(val1); num_val2 = float(val2)
-                    if more_is_better: is_val1_better, is_val2_better = num_val1 > num_val2, num_val2 > num_val1
-                    else: is_val1_better, is_val2_better = num_val1 < num_val2, num_val2 < num_val1
-                except (ValueError, TypeError): pass
-            elif val1 is not None: is_val1_better = True
-            elif val2 is not None: is_val2_better = True
+                val1 = stats1.get(key) if stats1 else None
+                val2 = stats2.get(key) if stats2 else None
 
-            # Создаем виджеты
-            label1 = QLabel(label_text + ":"); label1.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            value1_label = QLabel(val1_str); value1_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); value1_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            label2 = QLabel(label_text + ":"); label2.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            value2_label = QLabel(val2_str); value2_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); value2_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                # Показываем строку, только если есть данные хотя бы у одного
+                if val1 is not None or val2 is not None:
+                    val1_str = self._format_value(val1)
+                    val2_str = self._format_value(val2)
+                    is_val1_better, is_val2_better = False, False
+                    if val1 is not None and val2 is not None:
+                        try:
+                            num_val1, num_val2 = float(val1), float(val2)
+                            if more_is_better: is_val1_better, is_val2_better = num_val1 > num_val2, num_val2 > num_val1
+                            else: is_val1_better, is_val2_better = num_val1 < num_val2, num_val2 < num_val1
+                        except (ValueError, TypeError): pass
+                    elif val1 is not None: is_val1_better = True
+                    elif val2 is not None: is_val2_better = True
 
-            # Применяем стиль
-            if is_val1_better: value1_label.setStyleSheet(f"font-weight: bold; color: {highlight_color.name()};")
-            if is_val2_better: value2_label.setStyleSheet(f"font-weight: bold; color: {highlight_color.name()};")
+                    # Обновляем значения и стили
+                    value1_widget.setText(val1_str)
+                    value1_widget.setStyleSheet(highlight_style if is_val1_better else default_style)
+                    value2_widget.setText(val2_str)
+                    value2_widget.setStyleSheet(highlight_style if is_val2_better else default_style)
 
-            # Добавляем виджеты
-            self.driver1_grid.addWidget(label1, row, 0)
-            self.driver1_grid.addWidget(value1_label, row, 1)
-            self.driver2_grid.addWidget(label2, row, 0)
-            self.driver2_grid.addWidget(value2_label, row, 1)
-            any_widget_added = True # Устанавливаем флаг
-            # print(f"DEBUG [populate_grids] Added widgets for key '{key}' at row {row}") # Можно раскомментировать
+                    # Показываем виджеты для этой строки
+                    label1_widget.setVisible(True)
+                    value1_widget.setVisible(True)
+                    label2_widget.setVisible(True)
+                    value2_widget.setVisible(True)
+                    any_widget_shown = True
+                    # print(f"DEBUG [populate_grids] Updated widgets for key '{key}'")
+                else:
+                    # Если данных нет у обоих, скрываем строку
+                    label1_widget.setVisible(False)
+                    value1_widget.setVisible(False)
+                    label2_widget.setVisible(False)
+                    value2_widget.setVisible(False)
+                    # print(f"DEBUG [populate_grids] Hiding widgets for key '{key}' (both None)")
+            else:
+                # Если ключ неактуален для текущего типа сущности, скрываем
+                label1_widget.setVisible(False)
+                value1_widget.setVisible(False)
+                label2_widget.setVisible(False)
+                value2_widget.setVisible(False)
+                # print(f"DEBUG [populate_grids] Hiding widgets for key '{key}' (not in current stat map)")
 
-            row += 1
 
         # Обработка случая, если вообще не было данных для сравнения
-        if not any_widget_added: # Проверяем флаг
+        if not any_widget_shown:
             print("WARN [populate_grids] No comparison data found to display in grids.")
-            no_data_label1 = QLabel("Нет данных\nдля сравнения."); no_data_label1.setAlignment(Qt.AlignCenter); no_data_label1.setStyleSheet("color: gray;")
-            self.driver1_grid.addWidget(no_data_label1, 0, 0, 1, 2)
-            no_data_label2 = QLabel("Нет данных\nдля сравнения."); no_data_label2.setAlignment(Qt.AlignCenter); no_data_label2.setStyleSheet("color: gray;")
-            self.driver2_grid.addWidget(no_data_label2, 0, 0, 1, 2)
+            # Можно добавить одну метку "Нет данных", если нужно
+            # (но текущая логика просто скроет все строки)
         else:
-             print(f"DEBUG [populate_grids] Finished loop. Total rows added: {row}")
+            print(f"DEBUG [populate_grids] Finished updating grids.")
 
-        # --- Добавляем активацию layout'ов ---
-        print("DEBUG [populate_grids] Activating grids...")
-        self.driver1_grid.activate()
-        self.driver2_grid.activate()
-        # --- Конец добавления ---
+        # --- Активация layout'ов больше не нужна, т.к. структура не меняется ---
+        # self.driver1_grid.activate() # Можно убрать
+        # self.driver2_grid.activate() # Можно убрать
 
     def _format_value(self, value):
         """Форматирует значение для отображения."""
@@ -589,25 +643,40 @@ class CompareView(QWidget):
 
     def clear_results(self):
         """Очищает область отображения результатов статистики и графиков."""
-        # Очистка сеток статистики
-        self.driver1_stats_group.setTitle("Гонщик 1")
-        self.driver2_stats_group.setTitle("Гонщик 2")
-        for grid in [self.driver1_grid, self.driver2_grid]:
-            while grid.count():
-                child = grid.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
+        print("DEBUG: Clearing results...")
+        # --- Сброс сеток статистики ---
+        self.driver1_stats_group.setTitle("Сущность 1") # Сброс заголовка
+        self.driver2_stats_group.setTitle("Сущность 2") # Сброс заголовка
 
-        # Очищаем и скрываем ВСЕ графики
+        # Сбрасываем текст, стиль и видимость для всех предсозданных меток
+        default_style = ""
+        for key in self.grid1_labels:
+            label1, value1 = self.grid1_labels[key]
+            label2, value2 = self.grid2_labels[key]
+
+            value1.setText("-")
+            value1.setStyleSheet(default_style)
+            label1.setVisible(False) # Скрываем
+            value1.setVisible(False)
+
+            value2.setText("-")
+            value2.setStyleSheet(default_style)
+            label2.setVisible(False) # Скрываем
+            value2.setVisible(False)
+        # --- Конец сброса сеток ---
+
+        # Очищаем и скрываем ВСЕ графики (как и раньше)
         for canvas in [self.career_chart_canvas, self.season_finish_canvas, self.season_points_canvas]:
-            canvas.figure.clear()
+            # Используем ax.cla() для оптимизации (это будет в следующем шаге, пока оставим fig.clear())
+            # canvas.figure.gca().cla() # Очищаем оси
+            canvas.figure.clear() # Пока оставляем так
             canvas.draw()
             canvas.setVisible(False)
 
-        # Сбрасываем ВСЕ кэши
+        # Сбрасываем ВСЕ кэши (как и раньше)
         self.stats1_cache = None; self.stats2_cache = None
         self.season_results1_cache = None; self.season_results2_cache = None
-        # Режим и тип сбрасывать не нужно, они управляются UI
+        print("DEBUG: Results cleared.")
 
     def draw_comparison_chart(self):
         """Рисует график(и) сравнения в зависимости от режима и типа сущности."""
