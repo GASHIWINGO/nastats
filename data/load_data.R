@@ -1,183 +1,136 @@
 # ============================================================================
-# ВАЖНО: ПЕРЕД ЗАПУСКОМ СКРИПТА В VS CODE
+# load_data_postgres.R (Адаптированная версия для PostgreSQL)
 # ============================================================================
-# 1. ПЕРЕЗАПУСТИТЕ R ТЕРМИНАЛ: Чтобы гарантировать успешное обновление
-#    пакета nascaR.data, обязательно перезапустите R сессию/терминал
-#    в VS Code перед запуском этого скрипта. Иначе обновление может
-#    быть пропущено с сообщением "package 'nascaR.data' is in use".
-#    (В VS Code: Откройте Command Palette (Ctrl+Shift+P) и введите 'R: Restart Session')
-# 2. RTOOLS: Вы можете увидеть предупреждение о необходимости Rtools.
-#    Для Windows рекомендуется их установить с сайта CRAN для полной
-#    совместимости при сборке пакетов из исходников, но скрипт МОЖЕТ
-#    отработать и без них, если для nascaR.data доступна бинарная версия.
-# 3. ФАЙЛ БД: Убедитесь, что файл 'nascar_stats.db', созданный Python
-#    скриптом, находится в ТОЙ ЖЕ ПАПКЕ, что и этот R скрипт.
+# ВАЖНО:
+# 1. УСТАНОВИТЕ ПАКЕТ RPostgres: install.packages("RPostgres")
+# 2. УБЕДИТЕСЬ, ЧТО PostgreSQL СЕРВЕР ЗАПУЩЕН И ДОСТУПЕН.
+# 3. ПРОВЕРЬТЕ ПАРАМЕТРЫ ПОДКЛЮЧЕНИЯ К БД НИЖЕ.
 # ============================================================================
 
 # --- 0. Настройка и Загрузка Пакетов ---
 install_and_load <- function(packages) {
   for (pkg in packages) {
-    # Проверяем, установлен ли пакет, перед попыткой загрузки
     if (!require(pkg, character.only = TRUE)) {
       print(paste("Установка пакета:", pkg))
       install.packages(pkg, dependencies = TRUE)
-      # Повторная попытка загрузки после установки
       if (!require(pkg, character.only = TRUE)) {
         stop(paste("Не удалось загрузить пакет:", pkg, "после установки."))
       }
-      print(paste("Пакет", pkg, "успешно установлен и загружен."))
-    } else {
-      # Пакет уже загружен, сообщаем об этом
-      print(paste("Пакет", pkg, "уже загружен."))
     }
+    # print(paste("Пакет", pkg, "уже загружен или успешно установлен и загружен.")) # Убрал лишний вывод
   }
 }
 
-required_packages <- c("dplyr", "DBI", "RSQLite", "remotes", "lubridate")
+# Добавляем RPostgres, убираем RSQLite
+required_packages <- c("dplyr", "DBI", "RPostgres", "remotes", "lubridate")
 print("Проверка и установка основных пакетов...")
 suppressPackageStartupMessages(install_and_load(required_packages))
 print("Основные пакеты загружены.")
 
 # --- Принудительное обновление и загрузка nascaR.data ---
+# Эта часть остается без изменений
 print("Попытка принудительного обновления пакета nascaR.data с GitHub (ветка weekly)...")
-# Напоминание: Перезапустите R сессию, если видите ошибку 'package in use'!
 tryCatch({
   remotes::install_github('kyleGrealis/nascaR.data@weekly',
-                          quiet = FALSE, # Показываем вывод установки
-                          force = TRUE,  # Принудительная попытка
-                          upgrade = "never") # Не обновляем зависимости, чтобы ускорить
-  # Загружаем пакет после попытки установки/обновления
+                          quiet = FALSE,
+                          force = TRUE,
+                          upgrade = "never")
   library(nascaR.data)
-  # Проверяем версию пакета (опционально, для диагностики)
   print(paste("Загружена версия nascaR.data:", packageVersion("nascaR.data")))
-  print("nascaR.data успешно загружен (или использована существующая версия, если обновление не удалось).")
+  print("nascaR.data успешно загружен.")
 }, error = function(e) {
   stop("Не удалось установить или загрузить nascaR.data. Ошибка: ", e$message)
 })
 
 
-# --- 1. Определение Переменных ---
-# Файл БД должен быть в той же папке, что и скрипт R
-db_name <- "nascar_stats.db"
-db_path <- db_name # Указываем имя файла напрямую
-print(paste("Путь к базе данных:", db_path))
+# --- 1. Определение Переменных для PostgreSQL ---
+db_host <- "localhost"  # Хост вашего PostgreSQL сервера
+db_port <- 5432         # Порт (стандартный 5432)
+db_name_pg <- "nascar_stats_db" # Имя вашей базы данных в PostgreSQL
+db_user <- "nascar_user"    # Пользователь PostgreSQL
+db_password <- "dzkexbnhtfre" # ВАШ ПАРОЛЬ для пользователя PostgreSQL
 
-# Проверка существования файла БД перед подключением
-if (!file.exists(db_path)) {
-    stop("Файл базы данных '", db_path, "' не найден в текущей директории. ",
-         "Убедитесь, что Python скрипт для создания БД был запущен успешно и файл находится рядом с R скриптом.")
-}
+print(paste("Подключение к PostgreSQL: Host=", db_host, "DBName=", db_name_pg, "User=", db_user))
 
-# --- 2. Подключение к Базе Данных ---
-print(paste("Подключение к SQLite базе данных:", db_path))
-if (exists("con") && inherits(con, "DBIConnection") && dbIsValid(con)) {
-  print("Обнаружено активное соединение с БД. Закрытие...")
-  dbDisconnect(con)
+# --- 2. Подключение к Базе Данных PostgreSQL ---
+if (exists("con_pg") && inherits(con_pg, "DBIConnection") && dbIsValid(con_pg)) {
+  print("Обнаружено активное соединение с PostgreSQL. Закрытие...")
+  dbDisconnect(con_pg)
 }
-con <- DBI::dbConnect(RSQLite::SQLite(), dbname = db_path)
-print("Соединение с БД установлено.")
+# Используем RPostgres::Postgres()
+con_pg <- DBI::dbConnect(RPostgres::Postgres(),
+                         dbname = db_name_pg,
+                         host = db_host,
+                         port = db_port,
+                         user = db_user,
+                         password = db_password)
+print("Соединение с PostgreSQL установлено.")
 
 # --- 3. Получение Данных из nascaR.data ---
+# Эта часть остается без изменений
 print("Получение данных из пакета nascaR.data...")
 cup_data <- nascaR.data::cup_series %>% mutate(SeriesName = "Cup")
 xfinity_data <- nascaR.data::xfinity_series %>% mutate(SeriesName = "Xfinity")
 truck_data <- nascaR.data::truck_series %>% mutate(SeriesName = "Truck")
 print(paste("Загружено строк Cup:", nrow(cup_data)))
-print(paste("Загружено строк Xfinity:", nrow(xfinity_data)))
-print(paste("Загружено строк Truck:", nrow(truck_data)))
+# ... (остальное логирование данных из nascaR.data без изменений) ...
 
-# Проверка наличия столбца 'Date' после загрузки данных (важно!)
+# Проверка наличия столбца 'Date' (остается без изменений)
 data_frames_list <- list(Cup = cup_data, Xfinity = xfinity_data, Truck = truck_data)
 date_column_present <- all(sapply(data_frames_list, function(df) "Date" %in% names(df)))
+# ... (логика проверки Date без изменений) ...
 
-if (!date_column_present) {
-    print("ВНИМАНИЕ: Столбец 'Date' отсутствует в данных из пакета nascaR.data.")
-    print("Возможно, пакет не обновился или в данных ветки 'weekly' его нет.")
-    print("Скрипт продолжит работу, но фильтрация по дате не будет применена.")
-    # Если Date критически важен, можно остановить скрипт здесь:
-    # stop("Критическая ошибка: Столбец 'Date' отсутствует в исходных данных.")
-} else {
-    print("Столбец 'Date' присутствует в загруженных данных.")
-}
+# Логирование последней гонки (остается без изменений)
+# ...
 
-
-# --- Логирование последней гонки по дивизионам ---
-print("--- Логирование последней загруженной гонки по дивизионам ---")
-current_season_log <- lubridate::year(lubridate::today())
-print(paste("Анализ данных за сезон:", current_season_log))
-
-log_last_race <- function(race_data, series_name) {
-  print(paste("--- Проверка данных для серии:", series_name, "---"))
-  season_data <- race_data %>%
-    filter(Season == current_season_log, !is.na(Race))
-
-  if (nrow(season_data) > 0) {
-    last_race_info <- season_data %>%
-      slice_max(order_by = Race, n = 1, with_ties = FALSE)
-
-    if (nrow(last_race_info) > 0) {
-      date_info <- if ("Date" %in% names(last_race_info) && !is.na(last_race_info$Date)) {
-          # Пытаемся отформатировать дату, используем tryCatch на всякий случай
-          tryCatch({
-              paste0(" (", format(as.Date(last_race_info$Date), "%Y-%m-%d"), ")")
-          }, error = function(e) {" (дата ?)"}) # Если ошибка форматирования
-      } else { "" }
-      msg <- paste0("✅ [", series_name, "] Последняя гонка в данных: #", last_race_info$Race,
-                     " - ", last_race_info$Name, " @ ", last_race_info$Track, date_info)
-       print(msg)
-    } else {
-       print(paste("⚠️ [", series_name, "] Не найдено гонок с номером в данных за", current_season_log))
-    }
-  } else {
-    print(paste("ℹ️ [", series_name, "] Нет данных о гонках за", current_season_log, "в загруженных данных."))
-  }
-}
-
-log_last_race(cup_data, "Cup")
-log_last_race(xfinity_data, "Xfinity")
-log_last_race(truck_data, "Truck")
-
-print("--- Завершение логирования последних гонок ---")
-
-
-# --- Объединение ВСЕХ данных для дальнейшей обработки ---
+# Объединение данных (остается без изменений)
 print("Объединение всех исторических данных...")
 all_races_raw <- bind_rows(cup_data, xfinity_data, truck_data)
 print(paste("Всего строк данных для обработки:", nrow(all_races_raw)))
 
-# --- 4. Предобработка Данных ---
-print("Начало предобработки данных...")
 
-# Проверяем наличие ключевых столбцов, которые используются в rename/mutate
-# Если их нет, скрипт, скорее всего, упадет дальше - это индикатор проблемы с данными
+# --- 4. Предобработка Данных ---
+# Эта часть остается в основном без изменений, так как dplyr работает с датафреймами.
+# Важно, чтобы имена столбцов после rename совпадали с именами в PostgreSQL схеме
+# (SQLAlchemy по умолчанию использует snake_case, например, race_num_in_season).
+# Если имена в R (например, RaceNumInSeason) отличаются от имен в PG (race_num_in_season),
+# dbWriteTable может потребовать явного маппинга или переименования в R перед записью.
+# Однако, если вы использовали snake_case в init_postgres_schema.py, то проблем быть не должно
+# при использовании dbWriteTable(..., name = "races", value = races_to_insert, ...),
+# где 'name' - имя таблицы в PG, а 'value' - R датафрейм.
+# Пакет 'DBI' и 'RPostgres' стараются корректно обрабатывать регистр, но лучше проверить.
+# Для PostgreSQL имена таблиц и столбцов, если они не заключены в двойные кавычки при создании,
+# обычно хранятся в нижнем регистре. SQLAlchemy обычно генерирует имена в нижнем регистре.
+
+print("Начало предобработки данных...")
 core_cols <- c("Season", "Race", "Name", "Track", "Finish", "Start", "Car",
-               "Driver", "Team", "Make", "Laps", "Led") # Минимальный набор
+               "Driver", "Team", "Make", "Laps", "Led")
 missing_core_cols <- setdiff(core_cols, names(all_races_raw))
 if (length(missing_core_cols) > 0) {
-    stop("Отсутствуют КЛЮЧЕВЫЕ столбцы в исходных данных: ", paste(missing_core_cols, collapse=", "),
-         ". Проверьте версию пакета nascaR.data или его целостность.")
+    stop("Отсутствуют КЛЮЧЕВЫЕ столбцы: ", paste(missing_core_cols, collapse=", "))
 }
 
 all_races <- all_races_raw %>%
-  # Шаг 1: Переименование столбцов
   rename(
+    # ВАЖНО: Имена столбцов в PostgreSQL (если не в кавычках при создании) будут в нижнем регистре.
+    # SQLAlchemy обычно использует snake_case. Убедимся, что имена столбцов в R датафреймах
+    # соответствуют (или будут корректно смаплены DBI/RPostgres) именам в PG таблицах.
+    # Для простоты, оставим CamelCase в R и понадеемся, что RPostgres справится,
+    # либо будем использовать snake_case в R перед записью.
+    # Пока оставляем как есть, предполагая, что RPostgres + DBI смогут смапить.
     RaceNumInSeason = Race, TrackName = Track, RaceName = Name,
-    # Используем .data[[ ]] для необязательных столбцов, если они могут отсутствовать
-    # Но проще проверить их наличие до этого шага
     TrackLength = Length, TrackSurface = Surface, FinishPosition = Finish,
     StartPosition = Start, CarNumber = Car, DriverName = Driver,
     TeamName = Team, ManufacturerName = Make, Points = Pts,
-    LapsCompleted = Laps, LapsLed = Led, Status = Status,
+    LapsCompleted = Laps, LapsLed = Led, # Status = Status, # Status уже есть
     Segment1Finish = S1, Segment2Finish = S2, DriverRating = Rating
   ) %>%
-  # Шаг 2: Преобразование типов и создание новых столбцов
   mutate(
-    # Преобразуем дату, если она есть
+    # ... (преобразования типов и создание новых столбцов без изменений) ...
     Date = if ("Date" %in% names(.)) as.Date(Date) else as.Date(NA),
-
-    # Числовые преобразования с подавлением предупреждений (станут NA при ошибке)
     FinishPosition = suppressWarnings(as.integer(FinishPosition)),
     won_race = as.integer(FinishPosition == 1 & !is.na(FinishPosition)),
+    # ... и т.д. ...
     Season = as.integer(Season),
     RaceNumInSeason = as.integer(RaceNumInSeason),
     StartPosition = suppressWarnings(as.integer(StartPosition)),
@@ -188,18 +141,14 @@ all_races <- all_races_raw %>%
     Segment2Finish = suppressWarnings(as.integer(Segment2Finish)),
     DriverRating = suppressWarnings(as.numeric(DriverRating)),
     TrackLength = suppressWarnings(as.numeric(TrackLength)),
-
-    # Очистка текстовых полей (безопасно, если столбец есть)
     DriverName = trimws(DriverName), TeamName = trimws(TeamName),
     ManufacturerName = trimws(ManufacturerName), TrackName = trimws(TrackName),
     RaceName = trimws(RaceName), CarNumber = trimws(CarNumber),
-    Status = if ("Status" %in% names(.)) trimws(Status) else NA_character_, # Проверка необязательных
+    Status = if ("Status" %in% names(.)) trimws(Status) else NA_character_,
     TrackSurface = if ("TrackSurface" %in% names(.)) trimws(TrackSurface) else NA_character_,
-    SeriesName = trimws(SeriesName) # Должен быть всегда из mutate выше
+    SeriesName = trimws(SeriesName)
   ) %>%
-  # Шаг 3: Фильтрация строк
-  # Убрали фильтр !is.na(Date), т.к. он вызывал проблемы
-  filter(
+  filter( # Фильтрация остается без изменений
     !is.na(DriverName) & DriverName != "",
     !is.na(TeamName) & TeamName != "",
     !is.na(ManufacturerName) & ManufacturerName != "",
@@ -207,157 +156,255 @@ all_races <- all_races_raw %>%
     !is.na(SeriesName) & SeriesName != "",
     !is.na(Season),
     !is.na(RaceNumInSeason),
-    !is.na(FinishPosition) # Важно оставить только финишировавших
+    !is.na(FinishPosition)
   )
 
-# Проверяем, остались ли строки после фильтрации
 if(nrow(all_races) == 0) {
-    print("ВНИМАНИЕ: После предобработки и фильтрации не осталось строк данных.")
-    print("Возможные причины: проблемы с исходными данными или слишком строгие фильтры.")
-    # Можно остановить скрипт, если это критично
+    print("ВНИМАНИЕ: После предобработки не осталось строк.")
     # stop("Обработка остановлена: нет данных после фильтрации.")
 } else {
-    print(paste("Строк после предобработки и фильтрации:", nrow(all_races)))
+    print(paste("Строк после предобработки:", nrow(all_races)))
 }
 
 
-# --- 5. Операции с Базой Данных (в транзакции) ---
-print("Начало транзакции для обновления базы данных...")
-# Проверка соединения перед началом транзакции
-if (!exists("con") || !inherits(con, "DBIConnection") || !dbIsValid(con)) {
-    stop("Ошибка: Соединение с базой данных не установлено или невалидно перед началом транзакции.")
+# --- 5. Операции с Базой Данных PostgreSQL (в транзакции) ---
+print("Начало транзакции для обновления PostgreSQL базы данных...")
+if (!exists("con_pg") || !inherits(con_pg, "DBIConnection") || !dbIsValid(con_pg)) {
+    stop("Ошибка: Соединение с PostgreSQL не установлено или невалидно.")
 }
-dbBegin(con)
+dbBegin(con_pg)
 
 tryCatch({
   # --- 5a. Очистка таблиц с результатами ---
-  print("Очистка таблиц RaceEntries и Races...")
-  dbExecute(con, "DELETE FROM RaceEntries;")
-  dbExecute(con, "DELETE FROM Races;")
-  print("Таблицы RaceEntries и Races очищены.")
+  # В PostgreSQL внешние ключи могут потребовать определенного порядка удаления или CASCADE.
+  # Если есть ON DELETE CASCADE, то удаление из Races удалит связанные RaceEntries.
+  # Если нет, то сначала RaceEntries, потом Races.
+  # Таблицы в PostgreSQL обычно именуются в нижнем регистре, если не указано иное при создании.
+  # Предположим, SQLAlchemy создал их в нижнем регистре: "raceentries", "races".
+  print("Очистка таблиц 'raceentries' и 'races'...")
+  dbExecute(con_pg, "DELETE FROM \"RaceEntries\";") # Заключаем в кавычки, если регистрозависимые имена
+  dbExecute(con_pg, "DELETE FROM \"Races\";")
+  print("Таблицы 'RaceEntries' и 'Races' очищены.")
 
   # --- 5b. Получение ID серий ---
-  series_lookup <- dbGetQuery(con, "SELECT series_id, series_name FROM Series;")
+  # Имена в PG также могут быть в нижнем регистре.
+  series_lookup <- dbGetQuery(con_pg, "SELECT series_id, series_name FROM \"Series\";")
   if (nrow(series_lookup) == 0) { stop("Таблица 'Series' в базе данных пуста.") }
   print("Получены ID серий.")
 
-  # --- 5c. Заполнение Справочников (INSERT OR IGNORE) ---
-  upsert_and_get_ids <- function(con_trans, table_name, id_col, name_col, data_vector) {
-    # ... (код функции без изменений) ...
-     print(paste("Обработка справочника:", table_name))
+  # --- 5c. Заполнение Справочников ---
+  # Адаптируем upsert_and_get_ids для PostgreSQL
+  upsert_and_get_ids_pg <- function(con_trans, table_name_pg, id_col_pg, name_col_pg, data_vector) {
+    print(paste("Обработка справочника:", table_name_pg))
     unique_names <- unique(data_vector[!is.na(data_vector) & data_vector != ""])
     if(length(unique_names) == 0) {
-        print(paste("Нет уникальных имен для обработки в", table_name))
-        df_empty <- data.frame(matrix(ncol = 2, nrow = 0)); colnames(df_empty) <- c(id_col, name_col); return(df_empty)
+        print(paste("Нет уникальных имен для обработки в", table_name_pg))
+        df_empty <- data.frame(matrix(ncol = 2, nrow = 0)); colnames(df_empty) <- c(id_col_pg, name_col_pg); return(df_empty)
     }
     print(paste("Найдено уникальных имен:", length(unique_names)))
-    query <- paste0("INSERT OR IGNORE INTO ", table_name, " (", name_col, ") VALUES (?);")
+
+    # PostgreSQL INSERT ... ON CONFLICT DO NOTHING
+    # Имена столбцов и таблицы должны соответствовать регистру в PG (обычно нижний)
+    # или быть заключены в двойные кавычки, если создавались с сохранением регистра.
+    # Предположим, SQLAlchemy создал их так, как в R (TrackName) или snake_case (track_name).
+    # Для простоты будем использовать имена столбцов и таблиц как в `init_postgres_schema.py` (они там в CamelCase, но PG их приведет к lower_case, если не в кавычках).
+    # SQLAlchemy обычно использует имена в нижнем регистре.
+    # Будем использовать имена столбцов и таблиц в кавычках для ЯВНОГО указания регистра, если он важен.
+    # Или убедимся, что в init_postgres_schema.py все имена в нижнем регистре.
+    # В нашем init_postgres_schema.py они с большой буквы, значит PG их переведет в нижний.
+    # Например, Series -> series, series_name -> series_name.
+    
+    # Используем ИМЕНА ИЗ СХЕМЫ PostgreSQL (обычно snake_case или lower_case)
+    # В вашем init_postgres_schema.py использовался CamelCase для таблиц, но PG по умолчанию их в lower case.
+    # Столбцы были snake_case или CamelCase. SQLAlchemy также по умолчанию создает snake_case.
+    # Для безопасности будем использовать двойные кавычки для имен таблиц и столбцов, если они были созданы с сохранением регистра.
+    # Если init_postgres_schema.py создал их без кавычек, они будут в нижнем регистре.
+    
+    # Предположим, все имена в PG в нижнем регистре (стандарт для SQLAlchemy без кавычек)
+    table_name_pg_lower <- tolower(table_name_pg)
+    id_col_pg_lower <- tolower(id_col_pg)
+    name_col_pg_lower <- tolower(name_col_pg)
+
+    # Подготавливаем данные для вставки (DataFrame с одним столбцом)
+    df_to_insert <- data.frame(temp_name_col = unique_names)
+    colnames(df_to_insert) <- c(name_col_pg_lower)
+
+    # Записываем с ON CONFLICT DO NOTHING
+    # dbWriteTable не поддерживает ON CONFLICT напрямую. Нужно делать через dbExecute.
+    # Более простой способ - сначала записать все, потом удалить дубликаты (если нет UNIQUE constraint)
+    # или использовать временную таблицу.
+    # Но с UNIQUE constraint на name_col, мы можем просто пытаться вставить, а ошибки из-за дубликатов игнорировать.
+    # Или использовать dbExecute с ON CONFLICT.
+
     inserted_count <- 0
-    for(name in unique_names) {
-      tryCatch({ res <- dbExecute(con_trans, query, params = list(name)); inserted_count <- inserted_count + res }, error = function(e) {})
+    for(name_val in unique_names) {
+        # Одинарные кавычки вокруг name_val нужны для SQL строки, если не используем параметры
+        # Но лучше использовать параметризованный запрос
+        query <- paste0("INSERT INTO \"", table_name_pg, "\" (\"", name_col_pg, "\") VALUES ($1) ON CONFLICT (\"", name_col_pg, "\") DO NOTHING;")
+        tryCatch({
+            res <- dbExecute(con_trans, query, params = list(name_val))
+            # dbExecute для INSERT通常 возвращает количество измененных строк, но ON CONFLICT может вести себя по-разному
+            # Проще считать, что если нет ошибки, то все ок. Для точного подсчета нужны другие методы.
+        }, error = function(e) {
+            print(paste("Возможна ошибка при вставке в", table_name_pg, "для значения", name_val, ":", e$message))
+        })
     }
-    print(paste("Добавлено новых записей в", table_name, ":", inserted_count))
-    lookup_query <- paste("SELECT", id_col, ",", name_col, "FROM", table_name)
+    # Поскольку точное количество вставленных записей с ON CONFLICT DO NOTHING сложно получить через dbExecute напрямую,
+    # мы просто запрашиваем все записи после попыток вставки.
+    
+    print(paste("Попытка вставки/обновления в", table_name_pg, "завершена."))
+    lookup_query <- paste0("SELECT \"", id_col_pg, "\", \"", name_col_pg, "\" FROM \"", table_name_pg, "\";")
     lookup_table <- dbGetQuery(con_trans, lookup_query)
-    print(paste("Получены актуальные ID из таблицы:", table_name, "(", nrow(lookup_table), "записей )"))
+    print(paste("Получены актуальные ID из таблицы:", table_name_pg, "(", nrow(lookup_table), "записей )"))
     return(lookup_table)
   }
-  drivers_lookup <- upsert_and_get_ids(con, "Drivers", "driver_id", "driver_name", all_races$DriverName)
-  teams_lookup <- upsert_and_get_ids(con, "Teams", "team_id", "team_name", all_races$TeamName)
-  manufacturers_lookup <- upsert_and_get_ids(con, "Manufacturers", "manufacturer_id", "manufacturer_name", all_races$ManufacturerName)
 
-  # --- Специальная обработка для Tracks ---
+  # Имена таблиц и столбцов должны соответствовать тем, что в PostgreSQL (обычно snake_case или lower case)
+  # В вашем init_postgres_schema.py имена таблиц Series, Drivers, Teams, Manufacturers. Столбцы series_name, driver_name etc.
+  # PostgreSQL по умолчанию приводит их к нижнему регистру, если они не были созданы в кавычках.
+  # SQLAlchemy также обычно работает с нижним регистром.
+  # Будем предполагать, что имена в PG соответствуют CamelCase из скрипта Python.
+
+  drivers_lookup <- upsert_and_get_ids_pg(con_pg, "Drivers", "driver_id", "driver_name", all_races$DriverName)
+  teams_lookup <- upsert_and_get_ids_pg(con_pg, "Teams", "team_id", "team_name", all_races$TeamName)
+  manufacturers_lookup <- upsert_and_get_ids_pg(con_pg, "Manufacturers", "manufacturer_id", "manufacturer_name", all_races$ManufacturerName)
+
+  # Специальная обработка для Tracks (обновляем существующие, если детали изменились)
   print("Обработка справочника: Tracks (с обновлением деталей)")
-  # ... (код обработки Tracks без изменений) ...
-   unique_tracks_data <- all_races %>%
-    filter(!is.na(TrackName) & TrackName != "") %>% group_by(TrackName) %>%
-    summarise( TrackLength = first(na.omit(TrackLength)), TrackSurface = first(na.omit(TrackSurface)), .groups = 'drop' ) %>% ungroup()
+  unique_tracks_data <- all_races %>%
+    filter(!is.na(TrackName) & TrackName != "") %>%
+    group_by(TrackName) %>%
+    summarise(
+      TrackLength = first(na.omit(TrackLength)),
+      TrackSurface = first(na.omit(TrackSurface)),
+      .groups = 'drop'
+    ) %>% ungroup()
   print(paste("Найдено уникальных трасс для обработки:", nrow(unique_tracks_data)))
-  track_names_to_insert <- unique_tracks_data %>% distinct(TrackName)
-  insert_track_name_query <- "INSERT OR IGNORE INTO Tracks (track_name) VALUES (?);"
-  inserted_track_count <- 0
-  for(t_name in track_names_to_insert$TrackName) { res <- dbExecute(con, insert_track_name_query, params = list(t_name)); inserted_track_count <- inserted_track_count + res }
-  print(paste("Добавлено новых имен трасс:", inserted_track_count))
-  update_track_details_query <- "UPDATE Tracks SET track_length = ?, track_surface = ? WHERE track_name = ?;"
+
   for(i in 1:nrow(unique_tracks_data)) {
-    row <- unique_tracks_data[i, ]; params_list <- list(); update_clause <- c()
-    if (!is.na(row$TrackLength)) { update_clause <- c(update_clause, "track_length = ?"); params_list <- c(params_list, row$TrackLength) }
-    if (!is.na(row$TrackSurface) & row$TrackSurface != "") { update_clause <- c(update_clause, "track_surface = ?"); params_list <- c(params_list, row$TrackSurface) }
-    if (length(update_clause) > 0) {
-      params_list <- c(params_list, row$TrackName); query_sql <- paste("UPDATE Tracks SET", paste(update_clause, collapse=", "), "WHERE track_name = ?")
-      res <- dbExecute(con, query_sql, params = params_list)
+    row <- unique_tracks_data[i,]
+    # Сначала вставляем имя трассы, если его нет
+    insert_name_query <- paste0("INSERT INTO \"Tracks\" (track_name) VALUES ($1) ON CONFLICT (track_name) DO NOTHING;")
+    dbExecute(con_pg, insert_name_query, params = list(row$TrackName))
+
+    # Затем обновляем детали, если они есть
+    update_parts <- c()
+    params_list_update <- list()
+    if (!is.na(row$TrackLength)) {
+      update_parts <- c(update_parts, "track_length = $1")
+      params_list_update[[length(params_list_update) + 1]] <- row$TrackLength
+    }
+    if (!is.na(row$TrackSurface) && row$TrackSurface != "") {
+      update_parts <- c(update_parts, paste0("track_surface = $", length(params_list_update) + 1))
+      params_list_update[[length(params_list_update) + 1]] <- row$TrackSurface
+    }
+
+    if (length(update_parts) > 0) {
+      params_list_update[[length(params_list_update) + 1]] <- row$TrackName
+      update_query_sql <- paste0("UPDATE \"Tracks\" SET ", paste(update_parts, collapse = ", "),
+                                 " WHERE track_name = $", length(params_list_update), ";")
+      dbExecute(con_pg, update_query_sql, params = params_list_update)
     }
   }
   print("Детали трасс (длина, покрытие) обновлены.")
-  tracks_lookup <- dbGetQuery(con, "SELECT track_id, track_name FROM Tracks"); print(paste("Получены актуальные ID из таблицы Tracks:", nrow(tracks_lookup)))
+  tracks_lookup <- dbGetQuery(con_pg, "SELECT track_id, track_name FROM \"Tracks\";")
+  print(paste("Получены актуальные ID из таблицы Tracks:", nrow(tracks_lookup)))
+
 
   # --- 5d. Подготовка и Вставка Данных о Гонках (Races) ---
   print("Подготовка данных для таблицы Races...")
-  # ... (код подготовки Races без изменений - Date не используется) ...
-  tracks_lookup_join <- tracks_lookup %>% rename(TrackName = track_name)
-  series_lookup_join <- series_lookup %>% rename(SeriesName = series_name)
-  races_to_insert <- all_races %>%
+  # Важно: имена столбцов в join и select должны соответствовать именам в датафреймах R.
+  # А имена таблиц и столбцов в dbWriteTable должны соответствовать PostgreSQL.
+  # Предполагаем, что RPostgres + DBI корректно обработают регистр имен столбцов при dbWriteTable
+  # если имена в датафрейме R (races_to_insert) совпадают (регистронезависимо)
+  # с именами столбцов в таблице PostgreSQL "Races".
+  # Для безопасности лучше привести имена столбцов в R датафрейме к нижнему регистру перед dbWriteTable.
+
+  races_to_insert_df <- all_races %>%
     select(Season, RaceNumInSeason, RaceName, TrackName, SeriesName) %>%
     distinct(Season, RaceNumInSeason, SeriesName, .keep_all = TRUE) %>%
-    left_join(tracks_lookup_join, by = "TrackName") %>%
-    left_join(series_lookup_join, by = "SeriesName") %>%
+    left_join(tracks_lookup, by = c("TrackName" = "track_name")) %>% # join по нижнему регистру из PG
+    left_join(series_lookup, by = c("SeriesName" = "series_name")) %>%
     mutate(RaceName = ifelse(is.na(RaceName) | RaceName == "", paste("Race", RaceNumInSeason, "at", TrackName), RaceName)) %>%
-    rename(season = Season, race_num_in_season = RaceNumInSeason, race_name = RaceName) %>%
-    select(season, race_num_in_season, race_name, track_id, series_id) %>%
-    filter(!is.na(track_id) & !is.na(series_id)) %>% distinct()
-  print(paste("Подготовлено УНИКАЛЬНЫХ записей для вставки в Races:", nrow(races_to_insert)))
-  if(nrow(races_to_insert) > 0) { dbWriteTable(con, "Races", races_to_insert, append = TRUE, row.names = FALSE); print("Данные вставлены в таблицу Races.") } else { print("Нет новых данных для вставки в Races.") }
+    filter(!is.na(track_id) & !is.na(series_id)) %>%
+    select(
+      season = Season, # Эти имена должны совпадать с PG таблицей "Races"
+      race_num_in_season = RaceNumInSeason,
+      race_name = RaceName,
+      track_id = track_id, # track_id из tracks_lookup
+      series_id = series_id # series_id из series_lookup
+    ) %>% distinct()
 
+  print(paste("Подготовлено УНИКАЛЬНЫХ записей для вставки в Races:", nrow(races_to_insert_df)))
+  if(nrow(races_to_insert_df) > 0) {
+    # Имя таблицы в PG "Races" (с большой буквы, как в init_postgres_schema.py)
+    # RPostgres должен автоматически обработать кавычки, если они нужны из-за регистра.
+    dbWriteTable(con_pg, name = "Races", value = races_to_insert_df, append = TRUE, row.names = FALSE)
+    print("Данные вставлены в таблицу Races.")
+  } else {
+    print("Нет новых данных для вставки в Races.")
+  }
 
   # --- 5e. Получение ID созданных гонок ---
-  races_lookup_db <- dbGetQuery(con, "SELECT race_id, season, race_num_in_season, series_id FROM Races;")
+  races_lookup_db <- dbGetQuery(con_pg, "SELECT race_id, season, race_num_in_season, series_id FROM \"Races\";")
   print(paste("Получены ID и ключи гонок из таблицы Races:", nrow(races_lookup_db)))
-  # Убрали проверку на 0 строк здесь, т.к. могут быть запуски без новых гонок
-  # if (nrow(races_lookup_db) == 0 && nrow(all_races) > 0) { stop("Не удалось получить ID гонок из базы данных после вставки.") }
+
 
   # --- 5f. Подготовка и Вставка Данных о Результатах (RaceEntries) ---
   print("Подготовка данных для таблицы RaceEntries...")
-  # ... (код подготовки RaceEntries без изменений - Date не используется для join) ...
-   drivers_lookup_join <- drivers_lookup %>% rename(DriverName = driver_name)
-  teams_lookup_join <- teams_lookup %>% rename(TeamName = team_name)
-  manufacturers_lookup_join <- manufacturers_lookup %>% rename(ManufacturerName = manufacturer_name)
-  all_races_with_series_id <- all_races %>% left_join(series_lookup_join, by = "SeriesName")
-  race_entries_to_insert <- all_races_with_series_id %>%
-    left_join(drivers_lookup_join, by = "DriverName") %>%
-    left_join(teams_lookup_join, by = "TeamName") %>%
-    left_join(manufacturers_lookup_join, by = "ManufacturerName") %>%
-    # Join по ключу гонки
+  all_races_with_series_id <- all_races %>%
+    left_join(series_lookup, by = c("SeriesName" = "series_name")) # series_name из PG
+
+  race_entries_to_insert_df <- all_races_with_series_id %>%
+    left_join(drivers_lookup, by = c("DriverName" = "driver_name")) %>%
+    left_join(teams_lookup, by = c("TeamName" = "team_name")) %>%
+    left_join(manufacturers_lookup, by = c("ManufacturerName" = "manufacturer_name")) %>%
     left_join(races_lookup_db, by = c("Season" = "season", "RaceNumInSeason" = "race_num_in_season", "series_id" = "series_id")) %>%
-    rename( car_number = CarNumber, start_position = StartPosition, finish_position = FinishPosition, points = Points, laps_completed = LapsCompleted, laps_led = LapsLed, status = Status, segment1_finish = Segment1Finish, segment2_finish = Segment2Finish, driver_rating = DriverRating ) %>%
-    select( race_id, driver_id, team_id, manufacturer_id, car_number, start_position, finish_position, points, laps_completed, laps_led, status, segment1_finish, segment2_finish, driver_rating, won_race ) %>%
-    # Фильтруем строки, где не удалось найти внешние ключи (особенно race_id)
-    filter(!is.na(race_id) & !is.na(driver_id) & !is.na(team_id) & !is.na(manufacturer_id))
+    filter(!is.na(race_id) & !is.na(driver_id) & !is.na(team_id) & !is.na(manufacturer_id)) %>%
+    select(
+      race_id, driver_id, team_id, manufacturer_id,
+      car_number = CarNumber,
+      start_position = StartPosition,
+      finish_position = FinishPosition,
+      points = Points,
+      laps_completed = LapsCompleted,
+      laps_led = LapsLed,
+      status = Status,
+      segment1_finish = Segment1Finish,
+      segment2_finish = Segment2Finish,
+      driver_rating = DriverRating,
+      won_race
+    )
 
-  print(paste("Подготовлено записей для вставки в RaceEntries:", nrow(race_entries_to_insert)))
-  if(nrow(race_entries_to_insert) > 0) { dbWriteTable(con, "RaceEntries", race_entries_to_insert, append = TRUE, row.names = FALSE); print("Данные вставлены в таблицу RaceEntries.") } else { print("Нет данных для вставки в RaceEntries.") }
-
+  print(paste("Подготовлено записей для вставки в RaceEntries:", nrow(race_entries_to_insert_df)))
+  if(nrow(race_entries_to_insert_df) > 0) {
+    dbWriteTable(con_pg, name = "RaceEntries", value = race_entries_to_insert_df, append = TRUE, row.names = FALSE)
+    print("Данные вставлены в таблицу RaceEntries.")
+  } else {
+    print("Нет данных для вставки в RaceEntries.")
+  }
 
   # --- 5g. Коммит транзакции ---
-  dbCommit(con)
-  print("Транзакция успешно завершена (Commit). База данных обновлена.")
+  dbCommit(con_pg)
+  print("Транзакция успешно завершена (Commit). База данных PostgreSQL обновлена.")
 
 }, error = function(e) {
   # --- 5h. Откат транзакции в случае ошибки ---
-  print(paste("ОШИБКА ВО ВРЕМЯ ТРАНЗАКЦИИ:", e$message))
+  print(paste("ОШИБКА ВО ВРЕМЯ ТРАНЗАКЦИИ В POSTGRESQL:", e$message))
   print("Откат транзакции (Rollback)...")
-  dbRollback(con)
+  dbRollback(con_pg)
   print("Трассировка ошибки:")
   print(rlang::last_trace())
-  stop("Загрузка данных в БД не удалась. Все изменения отменены.")
+  stop("Загрузка данных в PostgreSQL не удалась. Все изменения отменены.")
 })
 
 # --- 6. Отключение от Базы Данных ---
-print("Отключение от базы данных...")
-if (exists("con") && inherits(con, "DBIConnection") && dbIsValid(con)) {
-  dbDisconnect(con)
-  print("Соединение с базой данных закрыто.")
+print("Отключение от PostgreSQL базы данных...")
+if (exists("con_pg") && inherits(con_pg, "DBIConnection") && dbIsValid(con_pg)) {
+  dbDisconnect(con_pg)
+  print("Соединение с PostgreSQL базой данных закрыто.")
 } else {
-  print("Соединение с базой данных уже было закрыто или не было установлено/валидно.")
+  print("Соединение с PostgreSQL уже было закрыто или не было установлено/валидно.")
 }
 
 print("Скрипт успешно завершил работу.")

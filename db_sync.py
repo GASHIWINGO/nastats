@@ -8,9 +8,18 @@ from contextlib import contextmanager
 # Определяем путь к корневой папке проекта
 # D:/cod/statistics/database/db_sync.py -> D:/cod/statistics/
 PROJECT_ROOT = os.path.dirname(__file__)
-DB_NAME = 'data/nascar_stats.db'
-DB_PATH = os.path.join(PROJECT_ROOT, DB_NAME)
-DB_URL = f'sqlite:///{DB_PATH}' # Используем стандартный драйвер sqlite
+#DB_NAME = 'data/nascar_stats.db'
+#DB_PATH = os.path.join(PROJECT_ROOT, DB_NAME)
+#DB_URL = f'sqlite:///{DB_PATH}' # Используем стандартный драйвер sqlite
+
+DB_USER_LOCAL = "nascar_user"  # Ваш пользователь PostgreSQL
+DB_PASSWORD_LOCAL = "dzkexbnhtfre" # Ваш пароль
+DB_HOST_LOCAL = "localhost"
+DB_PORT_LOCAL = "5432"
+DB_NAME_LOCAL_PG = "nascar_stats_db" # Имя вашей PostgreSQL БД
+
+DB_URL = f"postgresql+psycopg2://{DB_USER_LOCAL}:{DB_PASSWORD_LOCAL}@{DB_HOST_LOCAL}:{DB_PORT_LOCAL}/{DB_NAME_LOCAL_PG}"
+
 
 # --- SQLAlchemy Setup ---
 logger = logging.getLogger(__name__) # Логгер для этого модуля
