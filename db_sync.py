@@ -5,20 +5,14 @@ from sqlalchemy import create_engine, select, func, MetaData, desc, asc, text, c
 from sqlalchemy.orm import sessionmaker, Session # Импортируем обычную Session
 from contextlib import contextmanager
 
-# Определяем путь к корневой папке проекта
-# D:/cod/statistics/database/db_sync.py -> D:/cod/statistics/
-PROJECT_ROOT = os.path.dirname(__file__)
-#DB_NAME = 'data/nascar_stats.db'
-#DB_PATH = os.path.join(PROJECT_ROOT, DB_NAME)
-#DB_URL = f'sqlite:///{DB_PATH}' # Используем стандартный драйвер sqlite
+DB_USER_VPS = "nascar_db_owner"        # Пользователь из docker-compose.yml
+DB_PASSWORD_VPS = "qwerty123"          # !!! ВАШ РЕАЛЬНЫЙ ПАРОЛЬ из docker-compose.yml !!!
+DB_HOST_VPS = "185.225.35.54"    # !!! ВАШ ПУБЛИЧНЫЙ IP АДРЕС VPS !!!
+DB_PORT_VPS = "5434"                   # Порт, который открыт на VPS (был 5433, потом 5434)
+DB_NAME_VPS_PG = "nascar_stats_db_prod" # Имя БД из docker-compose.yml
 
-DB_USER_LOCAL = "nascar_user"  # Ваш пользователь PostgreSQL
-DB_PASSWORD_LOCAL = "dzkexbnhtfre" # Ваш пароль
-DB_HOST_LOCAL = "localhost"
-DB_PORT_LOCAL = "5432"
-DB_NAME_LOCAL_PG = "nascar_stats_db" # Имя вашей PostgreSQL БД
-
-DB_URL = f"postgresql+psycopg2://{DB_USER_LOCAL}:{DB_PASSWORD_LOCAL}@{DB_HOST_LOCAL}:{DB_PORT_LOCAL}/{DB_NAME_LOCAL_PG}"
+# Строка подключения для psycopg2 (для синхронного доступа из десктопа)
+DB_URL = f"postgresql+psycopg2://{DB_USER_VPS}:{DB_PASSWORD_VPS}@{DB_HOST_VPS}:{DB_PORT_VPS}/{DB_NAME_VPS_PG}"
 
 
 # --- SQLAlchemy Setup ---
