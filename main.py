@@ -13,7 +13,7 @@ if __name__ == "__main__":
     reflect_db_schema()
 
     theme_manager = ThemeManager(app)
-    theme_manager.apply_theme("light")  # по умолчанию — светлая тема
+    theme_manager.apply_theme("light")
     
     window = MainWindow(theme_manager)
     window.show()
