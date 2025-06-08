@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView, QHeaderView, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableView, QHeaderView, QSizePolicy, QLineEdit
 from PySide6.QtCore import Qt, Signal
 import db_sync
 from models.team_table_model import TeamTableModel
@@ -11,7 +11,7 @@ class TeamListView(QWidget):
         super().__init__(parent)
         self.season = None
         self.series = None
-        self.teams = []
+        self._all_teams = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -21,24 +21,32 @@ class TeamListView(QWidget):
         self.label.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(self.label)
 
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Фильтр по названию команды...")
+        self.search_box.textChanged.connect(self.apply_filter)
+        layout.addWidget(self.search_box)
+
         self.table = QTableView()
         self.table.setSortingEnabled(True)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.doubleClicked.connect(self._on_row_double_clicked)
         layout.addWidget(self.table, stretch=1)
 
-        self._configure_header()
-
-    def _configure_header(self):
+    def _configure_table(self):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(QHeaderView.Fixed)
 
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Команда
-        self.table.setColumnWidth(1, 80)   # Очки
-        self.table.setColumnWidth(2, 80)   # Победы
-        self.table.setColumnWidth(3, 80)   # Топ-5
-        self.table.setColumnWidth(4, 80)   # Участий
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setColumnWidth(1, 80)
+        self.table.setColumnWidth(2, 80)
+        self.table.setColumnWidth(3, 80)
+        self.table.setColumnWidth(4, 80)
+
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(1, Qt.DescendingOrder)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableView.SelectRows)
 
     def update_context(self, season: int, series: str):
         self.season = season
@@ -46,21 +54,35 @@ class TeamListView(QWidget):
         self._load_data()
 
     def _load_data(self):
-        self.teams, _, _ = db_sync.get_team_standings(
+        teams, _, _ = db_sync.get_team_standings(
             self.season,
             self.series,
             page=1,
-            page_size=5000  # ✅ все команды
+            page_size=5000
         )
+        self._all_teams = teams
         self.label.setText(f"Команды: {self.series} — {self.season}")
-        model = TeamTableModel(self.teams, self)
+        self.apply_filter()
+
+    def apply_filter(self):
+        query = self.search_box.text().lower()
+        if not query:
+            filtered_teams = self._all_teams
+        else:
+            filtered_teams = [
+                t for t in self._all_teams
+                if query in t.team_name.lower()
+            ]
+
+        model = TeamTableModel(filtered_teams, self)
         self.table.setModel(model)
-        self._configure_header()
-        self.table.sortByColumn(1, Qt.DescendingOrder)
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QTableView.SelectRows)
+        self._configure_table()
 
     def _on_row_double_clicked(self, index):
+        if not index.isValid():
+            return
         model: TeamTableModel = self.table.model()
+        if not model:
+            return
         team_id = model.team_id(index.row())
         self.team_selected.emit(team_id)
