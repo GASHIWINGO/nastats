@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib import ticker
 import db_sync
 
 
@@ -154,4 +155,7 @@ class ManufacturerDetailsView(QWidget):
         ax.set_xlabel("Сезон")
         ax.set_ylabel("Победы")
         ax.grid(True)
+
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
+
         self.wins_canvas.draw()
